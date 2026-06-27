@@ -1,0 +1,893 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Year Canvas — 2026</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: 'Source Sans 3', system-ui, -apple-system, sans-serif;
+    background: #F4F5F7; color: #1B1E26;
+    -webkit-font-smoothing: antialiased; font-size: 14px;
+  }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: rgba(20,24,33,.16); border-radius: 8px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(20,24,33,.26); }
+  ::-webkit-scrollbar-track { background: transparent; }
+  input, textarea, select, button { font-family: inherit; }
+  input:focus, textarea:focus, select:focus { outline: none; }
+
+  /* hover states (ported from style-hover in the design) */
+  .backlog-item:hover { border-color:#DCDEE5 !important; box-shadow:0 2px 6px rgba(16,24,40,.07) !important; }
+  .chip:hover { filter:brightness(0.97); }
+  .add-btn:hover { background:#33384a !important; }
+  .cat-row:hover { background:#FAFAFB; }
+  .layer-row:hover { background:#FAFAFB; }
+  .reset-btn:hover { color:#6B7280 !important; }
+  .addperiod-btn:hover { background:#F3F4F6 !important; }
+  .range-label:hover { filter:brightness(0.94); }
+  .period-row:hover { border-color:#DCDEE5 !important; box-shadow:0 2px 6px rgba(16,24,40,.07); }
+  .done-btn:hover { background:#33384a !important; }
+  .tobacklog-btn:hover { background:#F3F4F6 !important; }
+  .delete-btn:hover { color:#96281c !important; }
+  .topbar-ctl { cursor:pointer; }
+
+  /* drag-over highlight (applied directly to drop targets during a drag) */
+  .cell.hot { background: rgba(74,110,210,.14) !important; }
+  .backlog-drop.hot { background: rgba(70,110,220,.07) !important; box-shadow: inset 0 0 0 2px oklch(0.62 0.12 256) !important; }
+
+  /* compact mode */
+  .compact .day-row { min-height: 20px !important; }
+  .compact .chip { font-size: 9.5px !important; padding: 1px 4px 1px 5px !important; }
+  .compact .day-num { font-size: 10px !important; }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+<div id="app"></div>
+<script>
+(function () {
+  "use strict";
+
+  // ----------------------------------------------------------------- constants
+  var MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var DIM  = [31,28,31,30,31,30,31,31,30,31,30,31]; // 2026 (not a leap year)
+  var YEAR = 2026;
+  var TODAY_M = 5;  // June
+  var TODAY_D = 27;
+  var STORE = 'yearcanvas.local.v2';
+  var ACCENT_BORDER = 'oklch(0.62 0.12 256)';
+
+  // ----------------------------------------------------------- Supabase sync
+  // The anon key is meant to be public (it only grants what RLS allows).
+  // Paste your project's values here, then commit + redeploy.
+  var SUPABASE_URL = '__SUPABASE_URL__';
+  var SUPABASE_ANON_KEY = '__SUPABASE_ANON_KEY__';
+  var CLOUD_ROW_ID = 'singleton'; // single shared dataset (no login)
+  var sb = (window.supabase && SUPABASE_URL.indexOf('http') === 0)
+    ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+    : null;
+
+  // each palette maps a category id to an oklch color {l,c,h}
+  var PALETTES = {
+    default: { c_work:{l:0.62,c:0.165,h:252}, c_health:{l:0.70,c:0.165,h:150}, c_home:{l:0.74,c:0.155,h:66}, c_travel:{l:0.64,c:0.190,h:18}, c_personal:{l:0.60,c:0.180,h:300} },
+    cool:    { c_work:{l:0.60,c:0.110,h:248}, c_health:{l:0.66,c:0.100,h:192}, c_home:{l:0.63,c:0.095,h:222}, c_travel:{l:0.60,c:0.110,h:300}, c_personal:{l:0.58,c:0.105,h:276} },
+    warm:    { c_work:{l:0.62,c:0.120,h:30},  c_health:{l:0.65,c:0.110,h:135}, c_home:{l:0.70,c:0.125,h:62}, c_travel:{l:0.62,c:0.130,h:8},  c_personal:{l:0.62,c:0.120,h:330} },
+  };
+
+  // ----------------------------------------------------------------- defaults
+  function buildDefault() {
+    var categories = [
+      { id:'c_work', name:'Work' },
+      { id:'c_health', name:'Health' },
+      { id:'c_home', name:'Home' },
+      { id:'c_travel', name:'Travel' },
+      { id:'c_personal', name:'Personal' },
+    ];
+    var items = [
+      // ---- backlog (month: null) ----
+      { id:'it_1', title:'Wireframe onboarding', categoryId:'c_work', note:'', month:null, day:null },
+      { id:'it_2', title:'Record episode 12', categoryId:'c_work', note:'Guest: Mira', month:null, day:null },
+      { id:'it_3', title:'Sort tax receipts', categoryId:'c_work', note:'', month:null, day:null },
+      { id:'it_4', title:'Replace garage shelving', categoryId:'c_home', note:'', month:null, day:null },
+      { id:'it_5', title:'Repaint the hallway', categoryId:'c_home', note:'', month:null, day:null },
+      { id:'it_6', title:'Plan summer trip', categoryId:'c_travel', note:'Coast or mountains?', month:null, day:null },
+      { id:'it_7', title:'Sign up for a 10k', categoryId:'c_health', note:'', month:null, day:null },
+      { id:'it_8', title:'New strength program', categoryId:'c_health', note:'', month:null, day:null },
+      { id:'it_9', title:'Back up photo archive', categoryId:'c_personal', note:'', month:null, day:null },
+      { id:'it_10', title:'Sketch podcast rebrand', categoryId:'c_work', note:'', month:null, day:null },
+      { id:'it_11', title:'Research standing desk', categoryId:'c_personal', note:'', month:null, day:null },
+      { id:'it_12', title:'Declutter the closet', categoryId:'c_home', note:'', month:null, day:null },
+      // ---- scheduled (month + day) ----
+      { id:'it_13', title:'Ship v2 release', categoryId:'c_work', note:'Feature freeze first', month:5, day:22 },
+      { id:'it_14', title:'Kitchen reno quotes', categoryId:'c_home', note:'', month:5, day:5 },
+      { id:'it_15', title:'Strength PR test', categoryId:'c_health', note:'', month:5, day:28 },
+      { id:'it_16', title:'Garage epoxy floor', categoryId:'c_home', note:'2-day cure', month:6, day:1 },
+      { id:'it_17', title:'Q3 planning', categoryId:'c_work', note:'', month:6, day:14 },
+      { id:'it_18', title:'Family beach week', categoryId:'c_travel', note:'', month:7, day:19 },
+      { id:'it_19', title:'Podcast live event', categoryId:'c_work', note:'Venue TBD', month:8, day:12 },
+      { id:'it_20', title:'Half marathon', categoryId:'c_health', note:'', month:9, day:11 },
+      { id:'it_21', title:'Conference talk', categoryId:'c_work', note:'', month:10, day:6 },
+      { id:'it_22', title:'Mobility reset', categoryId:'c_health', note:'', month:2, day:18 },
+      { id:'it_23', title:'Kickoff planning', categoryId:'c_work', note:'', month:0, day:7 },
+      { id:'it_24', title:'Garden beds', categoryId:'c_home', note:'', month:3, day:20 },
+      { id:'it_25', title:'Year review', categoryId:'c_work', note:'', month:11, day:12 },
+    ];
+    // ---- periods: multi-day vacations & public holidays (start/end inclusive) ----
+    var ranges = [
+      { id:'r_1', title:'Easter holiday', type:'holiday',  startMonth:2, startDay:30, endMonth:3, endDay:12, note:'School break' },
+      { id:'r_2', title:'Easter Monday',  type:'holiday',  startMonth:3, startDay:6,  endMonth:3, endDay:6,  note:'Bank holiday' },
+      { id:'r_3', title:'Summer vacation', type:'vacation', startMonth:7, startDay:3,  endMonth:7, endDay:16, note:'' },
+      { id:'r_4', title:"New Year's Day",  type:'holiday',  startMonth:0, startDay:1,  endMonth:0, endDay:1,  note:'' },
+    ];
+    var pv = {};
+    categories.forEach(function (c) { pv[c.id] = true; });
+    return { categories: categories, items: items, pv: pv, ranges: ranges };
+  }
+
+  function normalizeRange(r) {
+    var sm = (r.startMonth | 0), em = (r.endMonth | 0);
+    if (sm < 0) sm = 0; if (sm > 11) sm = 11;
+    if (em < 0) em = 0; if (em > 11) em = 11;
+    var sd = r.startDay, ed = r.endDay;
+    sd = Math.min(Math.max(parseInt(sd, 10) || 1, 1), DIM[sm]);
+    ed = Math.min(Math.max(parseInt(ed, 10) || 1, 1), DIM[em]);
+    return {
+      id: r.id || ('r_' + Date.now()),
+      title: r.title || 'Untitled',
+      type: r.type === 'vacation' ? 'vacation' : 'holiday',
+      startMonth: sm, startDay: sd, endMonth: em, endDay: ed,
+      note: r.note || ''
+    };
+  }
+
+  function loadState() {
+    var base = buildDefault();
+    var runtime = {
+      draggingId: null, editorId: null,
+      addTitle: '', addCategoryId: 'c_work',
+      palette: 'default', compact: false, showBalance: true,
+      showVacations: true, showHolidays: true,
+      periodEditorId: null, periodDraft: null,
+    };
+    try {
+      var raw = localStorage.getItem(STORE);
+      if (raw) {
+        var s = JSON.parse(raw);
+        if (s.items && s.items[0] && ('categoryId' in s.items[0])) {
+          base.items = s.items.map(function (it) {
+            var d = it.day;
+            if (it.month != null && d == null) d = 1;
+            if (d != null && d > 31) d = 31;
+            return {
+              id: it.id, title: it.title, categoryId: it.categoryId,
+              note: it.note || '',
+              month: (it.month == null ? null : it.month),
+              day: (it.month == null ? null : d)
+            };
+          });
+        }
+        if (s.pv) base.pv = Object.assign(base.pv, s.pv);
+        if (Array.isArray(s.ranges)) base.ranges = s.ranges.map(normalizeRange);
+        if (s.addCategoryId) runtime.addCategoryId = s.addCategoryId;
+        if (s.palette && PALETTES[s.palette]) runtime.palette = s.palette;
+        if (typeof s.compact === 'boolean') runtime.compact = s.compact;
+        if (typeof s.showBalance === 'boolean') runtime.showBalance = s.showBalance;
+        if (typeof s.showVacations === 'boolean') runtime.showVacations = s.showVacations;
+        if (typeof s.showHolidays === 'boolean') runtime.showHolidays = s.showHolidays;
+      }
+    } catch (e) {}
+    return Object.assign(base, runtime);
+  }
+
+  var state = loadState();
+
+  function snapshot() {
+    return {
+      items: state.items, pv: state.pv, ranges: state.ranges, addCategoryId: state.addCategoryId,
+      palette: state.palette, compact: state.compact, showBalance: state.showBalance,
+      showVacations: state.showVacations, showHolidays: state.showHolidays
+    };
+  }
+
+  function persist() {
+    var snap = snapshot();
+    try { localStorage.setItem(STORE, JSON.stringify(snap)); } catch (e) {}
+    cloudPush(snap);
+  }
+
+  // ----------------------------------------------------------- cloud sync ops
+  var cloudTimer = null;
+  function cloudPush(snap) {
+    if (!sb) return;
+    clearTimeout(cloudTimer);
+    cloudTimer = setTimeout(function () {
+      sb.from('year_canvas')
+        .upsert({ id: CLOUD_ROW_ID, data: snap, updated_at: new Date().toISOString() })
+        .then(function (res) { if (res.error) console.warn('Supabase save failed:', res.error.message); });
+    }, 600);
+  }
+
+  function applyRemote(s) {
+    if (s.items && s.items[0] && ('categoryId' in s.items[0])) {
+      state.items = s.items.map(function (it) {
+        var d = it.day;
+        if (it.month != null && d == null) d = 1;
+        if (d != null && d > 31) d = 31;
+        return {
+          id: it.id, title: it.title, categoryId: it.categoryId, note: it.note || '',
+          month: (it.month == null ? null : it.month),
+          day: (it.month == null ? null : d)
+        };
+      });
+    }
+    if (s.pv) state.pv = Object.assign({}, state.pv, s.pv);
+    if (Array.isArray(s.ranges)) state.ranges = s.ranges.map(normalizeRange);
+    if (s.addCategoryId) state.addCategoryId = s.addCategoryId;
+    if (s.palette && PALETTES[s.palette]) state.palette = s.palette;
+    if (typeof s.compact === 'boolean') state.compact = s.compact;
+    if (typeof s.showBalance === 'boolean') state.showBalance = s.showBalance;
+    if (typeof s.showVacations === 'boolean') state.showVacations = s.showVacations;
+    if (typeof s.showHolidays === 'boolean') state.showHolidays = s.showHolidays;
+  }
+
+  function cloudPull() {
+    if (!sb) return;
+    sb.from('year_canvas').select('data').eq('id', CLOUD_ROW_ID).maybeSingle()
+      .then(function (res) {
+        if (res.error) { console.warn('Supabase load failed:', res.error.message); return; }
+        var s = res.data && res.data.data;
+        if (!s) { cloudPush(snapshot()); return; } // first run: seed cloud from local/default
+        applyRemote(s);
+        render();
+      });
+  }
+
+  // ----------------------------------------------------------------- lookups
+  function palette() { return PALETTES[state.palette] || PALETTES.default; }
+  function catById(id) { return state.categories.find(function (c) { return c.id === id; }); }
+  function catColor(id) {
+    var b = palette()[id];
+    if (!b) return '#9AA0AB';
+    return 'oklch(' + b.l + ' ' + b.c + ' ' + b.h + ')';
+  }
+  function visibleItems() { return state.items.filter(function (it) { return state.pv[it.categoryId] !== false; }); }
+  function isWeekend(m, d) { var wd = new Date(YEAR, m, d).getDay(); return wd === 0 || wd === 6; }
+
+  // ----------------------------------------------------------------- periods (ranges)
+  function ord(m, d) { var t = 0; for (var i = 0; i < m; i++) t += DIM[i]; return t + d; } // day-of-year
+  function rangeColor(type) { return type === 'vacation' ? 'oklch(0.64 0.12 225)' : 'oklch(0.67 0.155 45)'; }
+  function rangeTint(color) { return 'color-mix(in oklab, ' + color + ' 15%, #ffffff)'; }
+  function clampDay(m, d) { d = parseInt(d, 10); if (isNaN(d) || d < 1) d = 1; if (d > DIM[m]) d = DIM[m]; return d; }
+  function visibleRanges() { return state.ranges.filter(function (r) { return r.type === 'vacation' ? state.showVacations : state.showHolidays; }); }
+  function spanDays(sm, sd, em, ed) { return ord(em, ed) - ord(sm, sd) + 1; }
+  function formatSpan(sm, sd, em, ed) {
+    if (sm === em && sd === ed) return MONTHS_SHORT[sm] + ' ' + sd;
+    if (sm === em) return MONTHS_SHORT[sm] + ' ' + sd + ' – ' + ed;
+    return MONTHS_SHORT[sm] + ' ' + sd + ' – ' + MONTHS_SHORT[em] + ' ' + ed;
+  }
+
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  // ----------------------------------------------------------------- mutations
+  function updateItem(id, patch) {
+    state.items = state.items.map(function (it) { return it.id === id ? Object.assign({}, it, patch) : it; });
+    persist();
+  }
+  function toggleCategory(cid) {
+    state.pv = Object.assign({}, state.pv); state.pv[cid] = !state.pv[cid];
+    persist(); render();
+  }
+  function resetFilters() {
+    var pv = {}; state.categories.forEach(function (c) { pv[c.id] = true; });
+    state.pv = pv; persist(); render();
+  }
+  function addItem() {
+    var title = (state.addTitle || '').trim();
+    if (!title) return;
+    var it = { id: 'it_' + Date.now(), title: title, categoryId: state.addCategoryId, note: '', month: null, day: null };
+    state.items = state.items.concat([it]);
+    state.addTitle = '';
+    persist(); render();
+  }
+  function dropToCell(m, d) {
+    var id = state.draggingId; if (id == null) return;
+    updateItem(id, { month: m, day: d });
+    state.draggingId = null; render();
+  }
+  function dropToBacklog() {
+    var id = state.draggingId; if (id == null) return;
+    updateItem(id, { month: null, day: null });
+    state.draggingId = null; render();
+  }
+  function deleteItem(id) {
+    state.items = state.items.filter(function (it) { return it.id !== id; });
+    state.editorId = null; persist(); render();
+  }
+
+  function openPeriodNew() {
+    state.periodEditorId = '__new__';
+    state.periodDraft = { id: null, title: '', type: 'vacation', startMonth: TODAY_M, startDay: TODAY_D, endMonth: TODAY_M, endDay: TODAY_D, note: '' };
+    state.editorId = null; render();
+  }
+  function openPeriodEdit(id) {
+    var r = state.ranges.find(function (x) { return x.id === id; });
+    if (!r) return;
+    state.periodEditorId = id;
+    state.periodDraft = { id: r.id, title: r.title, type: r.type, startMonth: r.startMonth, startDay: r.startDay, endMonth: r.endMonth, endDay: r.endDay, note: r.note || '' };
+    state.editorId = null; render();
+  }
+  function closePeriod() { state.periodEditorId = null; state.periodDraft = null; render(); }
+  function savePeriod() {
+    var pd = state.periodDraft; if (!pd) return;
+    var title = (pd.title || '').trim() || (pd.type === 'vacation' ? 'Vacation' : 'Holiday');
+    var sm = pd.startMonth | 0, em = pd.endMonth | 0;
+    var sd = clampDay(sm, pd.startDay), ed = clampDay(em, pd.endDay);
+    if (ord(em, ed) < ord(sm, sd)) { var tm = sm, td = sd; sm = em; sd = ed; em = tm; ed = td; } // forgiving: swap reversed ranges
+    var rec = { id: pd.id || ('r_' + Date.now()), title: title, type: pd.type, startMonth: sm, startDay: sd, endMonth: em, endDay: ed, note: pd.note || '' };
+    if (pd.id) state.ranges = state.ranges.map(function (r) { return r.id === pd.id ? rec : r; });
+    else state.ranges = state.ranges.concat([rec]);
+    state.periodEditorId = null; state.periodDraft = null;
+    persist(); render();
+  }
+  function deletePeriod() {
+    var pd = state.periodDraft;
+    if (pd && pd.id) state.ranges = state.ranges.filter(function (r) { return r.id !== pd.id; });
+    state.periodEditorId = null; state.periodDraft = null; persist(); render();
+  }
+  function toggleLayer(layer) {
+    if (layer === 'vacation') state.showVacations = !state.showVacations;
+    else state.showHolidays = !state.showHolidays;
+    persist(); render();
+  }
+
+  // ----------------------------------------------------------------- view model
+  function itemView(it) {
+    var c = catById(it.categoryId);
+    var color = catColor(it.categoryId);
+    return {
+      id: it.id, title: it.title, note: it.note || '', color: color,
+      chipBg: 'color-mix(in oklab, ' + color + ' 17%, #ffffff)',
+      chipText: 'color-mix(in oklab, ' + color + ' 64%, #181b22)',
+      catName: c ? c.name : ''
+    };
+  }
+
+  function computeVals() {
+    var S = state;
+    var vis = visibleItems();
+
+    var catCount = {}, monthCount = {};
+    S.items.forEach(function (it) {
+      if (S.pv[it.categoryId] === false) return;
+      catCount[it.categoryId] = (catCount[it.categoryId] || 0) + 1;
+      if (it.month != null) monthCount[it.month] = (monthCount[it.month] || 0) + 1;
+    });
+
+    var byCell = {};
+    vis.forEach(function (it) {
+      if (it.month != null) { var k = it.month + '-' + (it.day || 1); (byCell[k] = byCell[k] || []).push(it); }
+    });
+
+    var backlogItems = vis.filter(function (it) { return it.month == null; }).map(itemView);
+
+    var monthsHeader = MONTHS_SHORT.map(function (name, idx) {
+      var isToday = idx === TODAY_M;
+      var c = monthCount[idx] || 0;
+      return {
+        name: name, idx: idx,
+        bg: isToday ? '#EEF2FB' : '#FAFAFB',
+        color: isToday ? '#2A4FB0' : '#5A606C',
+        countLabel: c > 0 ? (c + (c === 1 ? ' item' : ' items')) : ''
+      };
+    });
+
+    var vr = visibleRanges();
+    var rows = [];
+    for (var d = 1; d <= 31; d++) {
+      var cells = [];
+      for (var m = 0; m < 12; m++) {
+        var valid = d <= DIM[m];
+        var weekend = valid && isWeekend(m, d);
+        var isToday = valid && m === TODAY_M && d === TODAY_D;
+        var its = valid ? (byCell[m + '-' + d] || []).map(itemView) : [];
+
+        // period coverage: tint covered cells; label at each month-segment start (start day, or day 1 of a continued month)
+        var coverColor = null, cellLabels = [];
+        if (valid) {
+          var od = ord(m, d);
+          for (var ri = 0; ri < vr.length; ri++) {
+            var r = vr[ri];
+            if (ord(r.startMonth, r.startDay) <= od && od <= ord(r.endMonth, r.endDay)) {
+              var rc = rangeColor(r.type);
+              if (!coverColor) coverColor = rc;
+              if ((m === r.startMonth && d === r.startDay) || d === 1) cellLabels.push({ id: r.id, title: r.title, color: rc });
+            }
+          }
+        }
+
+        var bg = !valid ? '#DBDDE1' : (coverColor ? rangeTint(coverColor) : (weekend ? '#F1F2F4' : '#FFFFFF'));
+        cells.push({
+          valid: valid, items: its, bg: bg, m: m, d: d, rangeLabels: cellLabels,
+          ring: isToday ? 'inset 0 0 0 2px ' + ACCENT_BORDER : 'none'
+        });
+      }
+      rows.push({ day: d, cells: cells });
+    }
+
+    // period list (sidebar) sorted by start date
+    var periodList = state.ranges.slice().sort(function (a, b) {
+      return ord(a.startMonth, a.startDay) - ord(b.startMonth, b.startDay);
+    }).map(function (r) {
+      return {
+        id: r.id, title: r.title, type: r.type, color: rangeColor(r.type),
+        span: formatSpan(r.startMonth, r.startDay, r.endMonth, r.endDay),
+        days: spanDays(r.startMonth, r.startDay, r.endMonth, r.endDay)
+      };
+    });
+
+    // period editor draft view
+    var period = null;
+    if (state.periodEditorId && state.periodDraft) {
+      var pd = state.periodDraft;
+      var psm = pd.startMonth | 0, pem = pd.endMonth | 0;
+      var psd = clampDay(psm, pd.startDay), ped = clampDay(pem, pd.endDay);
+      var lo = ord(psm, psd), hi = ord(pem, ped);
+      period = {
+        title: pd.title, type: pd.type, note: pd.note || '',
+        startMonth: psm, startDay: pd.startDay, endMonth: pem, endDay: pd.endDay,
+        color: rangeColor(pd.type),
+        typeLabel: pd.type === 'vacation' ? 'Vacation' : 'Public holiday',
+        spanText: hi >= lo ? formatSpan(psm, psd, pem, ped) : 'End is before start',
+        days: Math.max(1, hi - lo + 1)
+      };
+    }
+
+    var categoryTree = S.categories.map(function (c) {
+      var on = S.pv[c.id] !== false;
+      var color = catColor(c.id);
+      return {
+        id: c.id, name: c.name, count: catCount[c.id] || 0,
+        swatchBg: on ? color : '#fff',
+        swatchBorder: on ? color : '#C9CDD5',
+        mark: on ? '✓' : '',
+        textColor: on ? '#2A2E38' : '#B7BCC5'
+      };
+    });
+
+    var sched = vis.filter(function (it) { return it.month != null; });
+    var total = sched.length;
+    var balanceSegments = S.categories.map(function (c) {
+      var n = sched.filter(function (it) { return it.categoryId === c.id; }).length;
+      return {
+        id: c.id, name: c.name, color: catColor(c.id), count: n,
+        pct: total ? (n / total * 100).toFixed(2) : 0,
+        label: total ? (n + ' · ' + Math.round(n / total * 100) + '%') : '0'
+      };
+    }).filter(function (x) { return x.count > 0; });
+
+    var categoryOptions = S.categories.map(function (c) { return { id: c.id, label: c.name }; });
+
+    var editItem = S.editorId ? S.items.find(function (it) { return it.id === S.editorId; }) : null;
+    var editor = null;
+    if (editItem) {
+      var ec = catById(editItem.categoryId);
+      editor = {
+        id: editItem.id, title: editItem.title, note: editItem.note || '', categoryId: editItem.categoryId,
+        color: catColor(editItem.categoryId), catName: ec ? ec.name : '',
+        scheduled: editItem.month != null,
+        placement: editItem.month != null ? (MONTHS_SHORT[editItem.month] + ' ' + (editItem.day || 1)) : ''
+      };
+    }
+
+    return {
+      yearLabel: String(YEAR),
+      scheduledCount: sched.length,
+      backlogCount: backlogItems.length,
+      showBalance: S.showBalance,
+      monthsHeader: monthsHeader, rows: rows,
+      backlogItems: backlogItems, backlogEmpty: backlogItems.length === 0,
+      categoryTree: categoryTree,
+      balanceSegments: balanceSegments, balanceEmpty: balanceSegments.length === 0,
+      balanceCaption: total ? (total + ' scheduled') : '',
+      categoryOptions: categoryOptions,
+      addTitle: S.addTitle, addCategoryId: S.addCategoryId,
+      editorOpen: !!editor, editor: editor,
+      periodList: periodList, periodCount: periodList.length,
+      periodEditorOpen: !!period, period: period, periodIsNew: S.periodEditorId === '__new__'
+    };
+  }
+
+  // ----------------------------------------------------------------- render
+  function optionsHtml(opts, selected) {
+    return opts.map(function (o) {
+      return '<option value="' + esc(o.id) + '"' + (o.id === selected ? ' selected' : '') + '>' + esc(o.label) + '</option>';
+    }).join('');
+  }
+
+  function render() {
+    var v = computeVals();
+    var html = '';
+
+    html += '<div class="' + (state.compact ? 'compact ' : '') + 'root" style="display:flex; height:100vh; width:100%; overflow:hidden;">';
+
+    // ============ SIDEBAR ============
+    html += '<aside style="width:312px; flex:0 0 312px; height:100%; background:#FFFFFF; border-right:1px solid #EAEBEF; display:flex; flex-direction:column;">';
+    html += '<div style="padding:20px 20px 15px; border-bottom:1px solid #F0F1F4;">'
+          +   '<div style="display:flex; align-items:baseline; gap:8px;">'
+          +     '<div style="font-size:17px; font-weight:700; letter-spacing:-0.01em;">Year Canvas</div>'
+          +     '<div style="font-size:12.5px; color:#9AA0AB; font-weight:500;">' + esc(v.yearLabel) + '</div>'
+          +   '</div>'
+          +   '<div style="font-size:12.5px; color:#9AA0AB; margin-top:2px;">Your whole year at a glance</div>'
+          + '</div>';
+
+    html += '<div style="flex:1; min-height:0; overflow-y:auto; padding:16px 16px 24px;">';
+
+    // Quick add
+    html += '<div style="margin-bottom:20px;">'
+          +   '<div style="font-size:11px; font-weight:700; letter-spacing:0.07em; text-transform:uppercase; color:#9AA0AB; margin-bottom:9px;">Add to backlog</div>'
+          +   '<input type="text" data-field="addTitle" value="' + esc(v.addTitle) + '" placeholder="New item…" style="width:100%; border:1px solid #E4E6EB; background:#FBFBFC; border-radius:10px; padding:9px 11px; font-size:13.5px; color:#1B1E26; margin-bottom:7px;" />'
+          +   '<div style="display:flex; gap:7px;">'
+          +     '<select data-field="addCategory" style="flex:1; min-width:0; border:1px solid #E4E6EB; background:#FBFBFC; border-radius:10px; padding:8px 9px; font-size:12.5px; color:#4B5160;">' + optionsHtml(v.categoryOptions, v.addCategoryId) + '</select>'
+          +     '<button class="add-btn" data-action="add" style="flex:0 0 auto; border:none; background:#1B1E26; color:#fff; border-radius:10px; padding:0 15px; font-size:13px; font-weight:600; cursor:pointer;">Add</button>'
+          +   '</div>'
+          + '</div>';
+
+    // Backlog
+    html += '<div style="margin-bottom:22px;">'
+          +   '<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:9px;">'
+          +     '<div style="font-size:11px; font-weight:700; letter-spacing:0.07em; text-transform:uppercase; color:#9AA0AB;">Backlog</div>'
+          +     '<div style="font-size:11.5px; font-weight:600; color:#9AA0AB; background:#F3F4F6; border-radius:20px; padding:2px 8px;">' + v.backlogCount + '</div>'
+          +   '</div>'
+          +   '<div class="backlog-drop" data-drop="backlog" style="border-radius:12px; padding:6px; min-height:64px; transition:background .12s,box-shadow .12s; background:#FAFAFB; box-shadow:inset 0 0 0 1px #F0F1F4;">';
+    v.backlogItems.forEach(function (it) {
+      html += '<div class="backlog-item" draggable="true" data-id="' + esc(it.id) + '" data-action="edit" title="' + esc(it.title) + '" style="display:flex; align-items:center; gap:9px; padding:8px 9px; border-radius:9px; cursor:grab; background:#fff; border:1px solid #EEEFF2; margin:4px 0; box-shadow:0 1px 1.5px rgba(16,24,40,.04);">'
+            +   '<span style="flex:0 0 auto; width:9px; height:9px; border-radius:50%; background:' + it.color + ';"></span>'
+            +   '<span style="flex:1; min-width:0; font-size:13.5px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + esc(it.title) + '</span>'
+            +   '<span style="flex:0 0 auto; font-size:11px; color:#A7ACB6; font-weight:500;">' + esc(it.catName) + '</span>'
+            + '</div>';
+    });
+    if (v.backlogEmpty) {
+      html += '<div style="text-align:center; color:#B7BCC5; font-size:12.5px; padding:18px 8px;">Backlog clear — drag items here to unschedule</div>';
+    }
+    html += '</div></div>';
+
+    // Periods (vacations & public holidays)
+    html += '<div style="margin-bottom:22px;">'
+          +   '<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:9px;">'
+          +     '<div style="display:flex; align-items:center; gap:7px;">'
+          +       '<div style="font-size:11px; font-weight:700; letter-spacing:0.07em; text-transform:uppercase; color:#9AA0AB;">Periods</div>'
+          +       '<div style="font-size:11.5px; font-weight:600; color:#9AA0AB; background:#F3F4F6; border-radius:20px; padding:2px 8px;">' + v.periodCount + '</div>'
+          +     '</div>'
+          +     '<button class="addperiod-btn" data-action="add-period" style="border:1px solid #E4E6EB; background:#fff; color:#5A606C; font-size:11.5px; font-weight:600; cursor:pointer; padding:3px 9px; border-radius:8px;">+ Add</button>'
+          +   '</div>';
+    v.periodList.forEach(function (p) {
+      html += '<div class="period-row" data-action="edit-period" data-id="' + esc(p.id) + '" title="' + esc(p.title) + '" style="display:flex; align-items:center; gap:9px; padding:7px 8px; border-radius:9px; cursor:pointer; background:#fff; border:1px solid #EEEFF2; margin:4px 0;">'
+            +   '<span style="flex:0 0 auto; width:10px; height:10px; border-radius:3px; background:' + p.color + ';"></span>'
+            +   '<span style="flex:1; min-width:0; font-size:13px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + esc(p.title) + '</span>'
+            +   '<span style="flex:0 0 auto; font-size:11px; color:#A7ACB6; font-weight:500;">' + esc(p.span) + '</span>'
+            + '</div>';
+    });
+    if (v.periodCount === 0) {
+      html += '<div style="text-align:center; color:#B7BCC5; font-size:12.5px; padding:14px 8px;">No vacations or holidays yet — add one above.</div>';
+    }
+    // layer toggles (double as a legend)
+    html += '<div style="margin-top:10px; display:flex; flex-direction:column; gap:2px;">';
+    [['vacation', 'Vacations', state.showVacations], ['holiday', 'Public holidays', state.showHolidays]].forEach(function (L) {
+      var color = rangeColor(L[0]), on = L[2];
+      html += '<div class="layer-row" data-action="toggle-layer" data-layer="' + L[0] + '" style="display:flex; align-items:center; gap:10px; cursor:pointer; padding:5px 3px; border-radius:8px; user-select:none;">'
+            +   '<span style="flex:0 0 auto; width:15px; height:15px; border-radius:4px; display:flex; align-items:center; justify-content:center; background:' + (on ? color : '#fff') + '; border:1.5px solid ' + (on ? color : '#C9CDD5') + ';">'
+            +     '<span style="color:#fff; font-size:10px; font-weight:800; line-height:1;">' + (on ? '✓' : '') + '</span>'
+            +   '</span>'
+            +   '<span style="flex:1; font-size:13px; font-weight:600; color:' + (on ? '#2A2E38' : '#B7BCC5') + ';">' + L[1] + '</span>'
+            + '</div>';
+    });
+    html += '</div></div>';
+
+    // Filters
+    html += '<div style="margin-bottom:22px;">'
+          +   '<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:11px;">'
+          +     '<div style="font-size:11px; font-weight:700; letter-spacing:0.07em; text-transform:uppercase; color:#9AA0AB;">Categories</div>'
+          +     '<button class="reset-btn" data-action="reset" style="border:none; background:none; color:#A7ACB6; font-size:11.5px; font-weight:600; cursor:pointer; padding:0;">Reset</button>'
+          +   '</div>';
+    v.categoryTree.forEach(function (cat) {
+      html += '<div class="cat-row" data-action="toggle" data-id="' + esc(cat.id) + '" style="display:flex; align-items:center; gap:10px; cursor:pointer; padding:6px 3px; border-radius:8px; user-select:none;">'
+            +   '<span style="flex:0 0 auto; width:15px; height:15px; border-radius:4px; display:flex; align-items:center; justify-content:center; background:' + cat.swatchBg + '; border:1.5px solid ' + cat.swatchBorder + ';">'
+            +     '<span style="color:#fff; font-size:10px; font-weight:800; line-height:1;">' + cat.mark + '</span>'
+            +   '</span>'
+            +   '<span style="flex:1; font-size:13.5px; font-weight:600; color:' + cat.textColor + ';">' + esc(cat.name) + '</span>'
+            +   '<span style="font-size:11px; color:#B7BCC5; font-weight:600;">' + cat.count + '</span>'
+            + '</div>';
+    });
+    html += '</div>';
+
+    // Balance
+    if (v.showBalance) {
+      html += '<div>'
+            +   '<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">'
+            +     '<div style="font-size:11px; font-weight:700; letter-spacing:0.07em; text-transform:uppercase; color:#9AA0AB;">Balance</div>'
+            +     '<div style="font-size:11px; color:#B7BCC5; font-weight:500;">' + esc(v.balanceCaption) + '</div>'
+            +   '</div>'
+            +   '<div style="display:flex; height:10px; border-radius:20px; overflow:hidden; background:#F0F1F4;">';
+      v.balanceSegments.forEach(function (seg) {
+        html += '<div style="height:100%; width:' + seg.pct + '%; background:' + seg.color + ';"></div>';
+      });
+      html += '</div><div style="display:flex; flex-direction:column; gap:6px; margin-top:11px;">';
+      v.balanceSegments.forEach(function (seg) {
+        html += '<div style="display:flex; align-items:center; gap:8px;">'
+              +   '<span style="width:8px; height:8px; border-radius:50%; background:' + seg.color + ';"></span>'
+              +   '<span style="flex:1; font-size:12.5px; color:#5A606C; font-weight:500;">' + esc(seg.name) + '</span>'
+              +   '<span style="font-size:12px; color:#9AA0AB; font-weight:600;">' + esc(seg.label) + '</span>'
+              + '</div>';
+      });
+      html += '</div>';
+      if (v.balanceEmpty) {
+        html += '<div style="font-size:12.5px; color:#B7BCC5; margin-top:8px;">Nothing scheduled yet.</div>';
+      }
+      html += '</div>';
+    }
+
+    html += '</div></aside>';
+
+    // ============ MAIN ============
+    html += '<main style="flex:1; min-width:0; height:100%; display:flex; flex-direction:column;">';
+
+    // Top bar
+    html += '<div style="flex:0 0 auto; height:58px; display:flex; align-items:center; justify-content:space-between; padding:0 24px; border-bottom:1px solid #EAEBEF; background:#FAFAFB;">'
+          +   '<div style="display:flex; align-items:baseline; gap:11px;">'
+          +     '<div style="font-size:17px; font-weight:700; letter-spacing:-0.01em;">' + esc(v.yearLabel) + '</div>'
+          +     '<div style="font-size:13px; color:#9AA0AB;">Year planner</div>'
+          +   '</div>'
+          +   '<div style="display:flex; align-items:center; gap:16px;">'
+          +     '<label class="topbar-ctl" style="display:flex; align-items:center; gap:6px; font-size:12.5px; color:#6B7280; font-weight:600;">Palette'
+          +       '<select data-field="palette" style="border:1px solid #E4E6EB; background:#fff; border-radius:8px; padding:4px 7px; font-size:12.5px; color:#4B5160;">'
+          +         '<option value="default"' + (state.palette === 'default' ? ' selected' : '') + '>Default</option>'
+          +         '<option value="cool"' + (state.palette === 'cool' ? ' selected' : '') + '>Cool</option>'
+          +         '<option value="warm"' + (state.palette === 'warm' ? ' selected' : '') + '>Warm</option>'
+          +       '</select>'
+          +     '</label>'
+          +     '<label class="topbar-ctl" style="display:flex; align-items:center; gap:5px; font-size:12.5px; color:#6B7280; font-weight:600;"><input type="checkbox" data-field="showBalance"' + (state.showBalance ? ' checked' : '') + ' /> Balance</label>'
+          +     '<label class="topbar-ctl" style="display:flex; align-items:center; gap:5px; font-size:12.5px; color:#6B7280; font-weight:600;"><input type="checkbox" data-field="compact"' + (state.compact ? ' checked' : '') + ' /> Compact</label>'
+          +     '<div style="font-size:12.5px; color:#9AA0AB;">Drag from backlog onto any day · drag back to unschedule</div>'
+          +     '<div style="font-size:12.5px; color:#6B7280; font-weight:600;">' + v.scheduledCount + ' scheduled</div>'
+          +   '</div>'
+          + '</div>';
+
+    // Grid
+    html += '<div style="flex:1; min-height:0; overflow:auto; padding:0;">';
+    html += '<div style="min-width:920px; padding:0 0 40px;">';
+
+    // header row
+    html += '<div style="display:flex; position:sticky; top:0; z-index:5;">';
+    html += '<div style="flex:0 0 42px; position:sticky; left:0; z-index:6; background:#FAFAFB; border-right:1px solid #E4E6EB; border-bottom:1.5px solid #DCDEE3;"></div>';
+    v.monthsHeader.forEach(function (mh) {
+      html += '<div style="flex:1 1 0; min-width:66px; padding:9px 6px; text-align:center; background:' + mh.bg + '; border-right:1px solid #E4E6EB; border-bottom:1.5px solid #DCDEE3;">'
+            +   '<div style="font-size:12px; font-weight:700; letter-spacing:0.04em; text-transform:uppercase; color:' + mh.color + ';">' + esc(mh.name) + '</div>'
+            +   '<div style="font-size:10.5px; font-weight:600; color:#B0B5BE; margin-top:1px;">' + esc(mh.countLabel) + '</div>'
+            + '</div>';
+    });
+    html += '</div>';
+
+    // day rows
+    v.rows.forEach(function (row) {
+      html += '<div class="day-row" style="display:flex; min-height:25px;">';
+      html += '<div class="day-num" style="flex:0 0 42px; position:sticky; left:0; z-index:2; display:flex; align-items:center; justify-content:center; background:#FAFAFB; border-right:1px solid #C7CBD3; border-bottom:1px solid #D3D7DE; font-size:11px; font-weight:600; color:#7E8490;">' + row.day + '</div>';
+      row.cells.forEach(function (cell) {
+        var dropAttrs = cell.valid ? (' class="cell" data-drop="cell" data-m="' + cell.m + '" data-d="' + cell.d + '"') : ' class="cell"';
+        html += '<div' + dropAttrs + ' style="flex:1 1 0; min-width:66px; border-right:1px solid #D3D7DE; border-bottom:1px solid #D3D7DE; background:' + cell.bg + '; box-shadow:' + cell.ring + '; padding:2px; display:flex; flex-direction:column; gap:2px;">';
+        cell.rangeLabels.forEach(function (rl) {
+          html += '<div class="range-label" data-action="edit-period" data-id="' + esc(rl.id) + '" title="' + esc(rl.title) + '" style="background:' + rl.color + '; color:#fff; font-size:10px; font-weight:700; line-height:1.25; padding:2px 5px; border-radius:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; cursor:pointer;">' + esc(rl.title) + '</div>';
+        });
+        cell.items.forEach(function (it) {
+          html += '<div class="chip" draggable="true" data-id="' + esc(it.id) + '" data-action="edit" title="' + esc(it.title) + '" style="background:' + it.chipBg + '; color:' + it.chipText + '; border-left:2.5px solid ' + it.color + '; font-size:10.5px; font-weight:600; line-height:1.3; padding:2px 4px 2px 5px; border-radius:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; cursor:grab;">' + esc(it.title) + '</div>';
+        });
+        html += '</div>';
+      });
+      html += '</div>';
+    });
+
+    html += '</div></div></main>';
+
+    // ============ EDITOR MODAL ============
+    if (v.editorOpen) {
+      var ed = v.editor;
+      html += '<div data-action="overlay-close" style="position:fixed; inset:0; background:rgba(20,24,33,.32); display:flex; align-items:center; justify-content:center; z-index:50; backdrop-filter:blur(1.5px);">'
+            +   '<div data-modal-card style="width:430px; max-width:92vw; background:#fff; border-radius:18px; box-shadow:0 24px 64px rgba(16,24,40,.28); overflow:hidden;">'
+            +     '<div style="padding:20px 22px 16px; display:flex; align-items:center; gap:11px; border-bottom:1px solid #F0F1F4;">'
+            +       '<span style="width:12px; height:12px; border-radius:50%; background:' + ed.color + ';"></span>'
+            +       '<div style="flex:1; font-size:12px; font-weight:600; color:#9AA0AB;">' + esc(ed.catName) + '</div>'
+            +       (ed.scheduled ? '<div style="font-size:12px; font-weight:600; color:#9AA0AB; background:#F3F4F6; border-radius:20px; padding:3px 10px;">' + esc(ed.placement) + '</div>' : '')
+            +     '</div>'
+            +     '<div style="padding:18px 22px 22px;">'
+            +       '<label style="display:block; font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#9AA0AB; margin-bottom:7px;">Title</label>'
+            +       '<input type="text" data-field="editTitle" value="' + esc(ed.title) + '" style="width:100%; border:1px solid #E4E6EB; background:#FBFBFC; border-radius:11px; padding:11px 13px; font-size:15px; font-weight:600; color:#1B1E26; margin-bottom:16px;" />'
+            +       '<label style="display:block; font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#9AA0AB; margin-bottom:7px;">Category</label>'
+            +       '<select data-field="editCategory" style="width:100%; border:1px solid #E4E6EB; background:#FBFBFC; border-radius:11px; padding:11px 13px; font-size:14px; color:#1B1E26; margin-bottom:16px;">' + optionsHtml(v.categoryOptions, ed.categoryId) + '</select>'
+            +       '<label style="display:block; font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#9AA0AB; margin-bottom:7px;">Note</label>'
+            +       '<textarea data-field="editNote" placeholder="Add a short note…" style="width:100%; min-height:74px; resize:vertical; border:1px solid #E4E6EB; background:#FBFBFC; border-radius:11px; padding:11px 13px; font-size:13.5px; color:#4B5160; line-height:1.5; box-sizing:border-box; display:block;">' + esc(ed.note) + '</textarea>'
+            +     '</div>'
+            +     '<div style="display:flex; align-items:center; gap:9px; padding:14px 22px; border-top:1px solid #F0F1F4; background:#FAFAFB;">'
+            +       '<button class="delete-btn" data-action="delete" style="border:none; background:none; color:#C0392B; font-size:13px; font-weight:600; cursor:pointer; padding:8px 4px;">Delete</button>'
+            +       (ed.scheduled ? '<button class="tobacklog-btn" data-action="unschedule" style="border:1px solid #E4E6EB; background:#fff; color:#5A606C; font-size:13px; font-weight:600; cursor:pointer; padding:8px 14px; border-radius:9px;">To backlog</button>' : '')
+            +       '<span style="flex:1;"></span>'
+            +       '<button class="done-btn" data-action="close" style="border:none; background:#1B1E26; color:#fff; font-size:13px; font-weight:600; cursor:pointer; padding:9px 20px; border-radius:9px;">Done</button>'
+            +     '</div>'
+            +   '</div>'
+            + '</div>';
+    }
+
+    // ============ PERIOD EDITOR MODAL ============
+    if (v.periodEditorOpen) {
+      var p = v.period;
+      var monthOpts = function (sel) {
+        return MONTHS_SHORT.map(function (n, i) { return '<option value="' + i + '"' + (i === sel ? ' selected' : '') + '>' + n + '</option>'; }).join('');
+      };
+      var dateFieldStyle = 'border:1px solid #E4E6EB; background:#FBFBFC; border-radius:10px; padding:9px 10px; font-size:13.5px; color:#1B1E26;';
+      html += '<div data-action="period-overlay-close" style="position:fixed; inset:0; background:rgba(20,24,33,.32); display:flex; align-items:center; justify-content:center; z-index:50; backdrop-filter:blur(1.5px);">'
+            +   '<div data-modal-card style="width:460px; max-width:92vw; background:#fff; border-radius:18px; box-shadow:0 24px 64px rgba(16,24,40,.28); overflow:hidden;">'
+            +     '<div style="padding:20px 22px 16px; display:flex; align-items:center; gap:11px; border-bottom:1px solid #F0F1F4;">'
+            +       '<span style="width:12px; height:12px; border-radius:4px; background:' + p.color + ';"></span>'
+            +       '<div style="flex:1; font-size:12px; font-weight:600; color:#9AA0AB;">' + (v.periodIsNew ? 'New period' : 'Edit period') + '</div>'
+            +       '<div style="font-size:12px; font-weight:600; color:#9AA0AB; background:#F3F4F6; border-radius:20px; padding:3px 10px;">' + p.days + (p.days === 1 ? ' day' : ' days') + '</div>'
+            +     '</div>'
+            +     '<div style="padding:18px 22px 22px;">'
+            +       '<label style="display:block; font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#9AA0AB; margin-bottom:7px;">Title</label>'
+            +       '<input type="text" data-field="pTitle" value="' + esc(p.title) + '" placeholder="e.g. Summer vacation, Easter Monday" style="width:100%; border:1px solid #E4E6EB; background:#FBFBFC; border-radius:11px; padding:11px 13px; font-size:15px; font-weight:600; color:#1B1E26; margin-bottom:16px;" />'
+            +       '<label style="display:block; font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#9AA0AB; margin-bottom:7px;">Type</label>'
+            +       '<select data-field="pType" style="width:100%; border:1px solid #E4E6EB; background:#FBFBFC; border-radius:11px; padding:11px 13px; font-size:14px; color:#1B1E26; margin-bottom:16px;">'
+            +         '<option value="vacation"' + (p.type === 'vacation' ? ' selected' : '') + '>Vacation</option>'
+            +         '<option value="holiday"' + (p.type === 'holiday' ? ' selected' : '') + '>Public holiday</option>'
+            +       '</select>'
+            +       '<div style="display:flex; gap:14px; margin-bottom:14px;">'
+            +         '<div style="flex:1; min-width:0;">'
+            +           '<label style="display:block; font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#9AA0AB; margin-bottom:7px;">Start</label>'
+            +           '<div style="display:flex; gap:7px;">'
+            +             '<select data-field="pStartMonth" style="flex:1; min-width:0; ' + dateFieldStyle + '">' + monthOpts(p.startMonth) + '</select>'
+            +             '<input type="number" data-field="pStartDay" min="1" max="' + DIM[p.startMonth] + '" value="' + esc(p.startDay) + '" style="width:58px; ' + dateFieldStyle + '" />'
+            +           '</div>'
+            +         '</div>'
+            +         '<div style="flex:1; min-width:0;">'
+            +           '<label style="display:block; font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#9AA0AB; margin-bottom:7px;">End</label>'
+            +           '<div style="display:flex; gap:7px;">'
+            +             '<select data-field="pEndMonth" style="flex:1; min-width:0; ' + dateFieldStyle + '">' + monthOpts(p.endMonth) + '</select>'
+            +             '<input type="number" data-field="pEndDay" min="1" max="' + DIM[p.endMonth] + '" value="' + esc(p.endDay) + '" style="width:58px; ' + dateFieldStyle + '" />'
+            +           '</div>'
+            +         '</div>'
+            +       '</div>'
+            +       '<div style="font-size:12.5px; color:#9AA0AB; font-weight:500; margin-bottom:16px;">' + esc(p.spanText) + '  ·  for a single-day holiday, set start and end to the same date</div>'
+            +       '<label style="display:block; font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#9AA0AB; margin-bottom:7px;">Note</label>'
+            +       '<textarea data-field="pNote" placeholder="Add a short note…" style="width:100%; min-height:64px; resize:vertical; border:1px solid #E4E6EB; background:#FBFBFC; border-radius:11px; padding:11px 13px; font-size:13.5px; color:#4B5160; line-height:1.5; box-sizing:border-box; display:block;">' + esc(p.note) + '</textarea>'
+            +     '</div>'
+            +     '<div style="display:flex; align-items:center; gap:9px; padding:14px 22px; border-top:1px solid #F0F1F4; background:#FAFAFB;">'
+            +       (v.periodIsNew ? '' : '<button class="delete-btn" data-action="delete-period" style="border:none; background:none; color:#C0392B; font-size:13px; font-weight:600; cursor:pointer; padding:8px 4px;">Delete</button>')
+            +       '<span style="flex:1;"></span>'
+            +       '<button class="tobacklog-btn" data-action="period-close" style="border:1px solid #E4E6EB; background:#fff; color:#5A606C; font-size:13px; font-weight:600; cursor:pointer; padding:8px 14px; border-radius:9px;">Cancel</button>'
+            +       '<button class="done-btn" data-action="save-period" style="border:none; background:#1B1E26; color:#fff; font-size:13px; font-weight:600; cursor:pointer; padding:9px 20px; border-radius:9px;">' + (v.periodIsNew ? 'Add period' : 'Save') + '</button>'
+            +     '</div>'
+            +   '</div>'
+            + '</div>';
+    }
+
+    html += '</div>';
+
+    document.getElementById('app').innerHTML = html;
+  }
+
+  // ----------------------------------------------------------------- events (delegated, attached once)
+  var root = document.getElementById('app');
+  var hotEl = null;
+  function setHot(el) {
+    if (hotEl === el) return;
+    if (hotEl) hotEl.classList.remove('hot');
+    hotEl = el;
+    if (hotEl) hotEl.classList.add('hot');
+  }
+  function clearHot() { if (hotEl) hotEl.classList.remove('hot'); hotEl = null; }
+
+  root.addEventListener('dragstart', function (e) {
+    var el = e.target.closest('[data-id][draggable="true"]');
+    if (!el) return;
+    state.draggingId = el.getAttribute('data-id');
+    try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', state.draggingId); } catch (x) {}
+  });
+  root.addEventListener('dragend', function () { state.draggingId = null; clearHot(); });
+  root.addEventListener('dragover', function (e) {
+    var el = e.target.closest('[data-drop]');
+    if (!el) { setHot(null); return; }
+    e.preventDefault();
+    try { e.dataTransfer.dropEffect = 'move'; } catch (x) {}
+    setHot(el);
+  });
+  root.addEventListener('drop', function (e) {
+    var el = e.target.closest('[data-drop]');
+    if (!el) return;
+    e.preventDefault();
+    clearHot();
+    if (el.getAttribute('data-drop') === 'backlog') dropToBacklog();
+    else dropToCell(parseInt(el.getAttribute('data-m'), 10), parseInt(el.getAttribute('data-d'), 10));
+  });
+
+  root.addEventListener('click', function (e) {
+    var el = e.target.closest('[data-action]');
+    if (!el) return;
+    var action = el.getAttribute('data-action');
+    if (action === 'overlay-close') {
+      if (!e.target.closest('[data-modal-card]')) { state.editorId = null; render(); }
+      return;
+    }
+    if (action === 'period-overlay-close') {
+      if (!e.target.closest('[data-modal-card]')) closePeriod();
+      return;
+    }
+    switch (action) {
+      case 'add': addItem(); break;
+      case 'reset': resetFilters(); break;
+      case 'toggle': toggleCategory(el.getAttribute('data-id')); break;
+      case 'edit': state.editorId = el.getAttribute('data-id'); state.periodEditorId = null; render(); break;
+      case 'delete': deleteItem(state.editorId); break;
+      case 'unschedule': updateItem(state.editorId, { month: null, day: null }); render(); break;
+      case 'close': state.editorId = null; render(); break;
+      case 'add-period': openPeriodNew(); break;
+      case 'edit-period': openPeriodEdit(el.getAttribute('data-id')); break;
+      case 'save-period': savePeriod(); break;
+      case 'delete-period': deletePeriod(); break;
+      case 'period-close': closePeriod(); break;
+      case 'toggle-layer': toggleLayer(el.getAttribute('data-layer')); break;
+    }
+  });
+
+  // text inputs: update state silently to preserve focus/caret (no re-render per keystroke)
+  root.addEventListener('input', function (e) {
+    var f = e.target.getAttribute && e.target.getAttribute('data-field');
+    if (!f) return;
+    if (f === 'addTitle') { state.addTitle = e.target.value; }
+    else if (f === 'editTitle') { if (state.editorId) updateItem(state.editorId, { title: e.target.value }); }
+    else if (f === 'editNote') { if (state.editorId) updateItem(state.editorId, { note: e.target.value }); }
+    else if (state.periodDraft) {
+      if (f === 'pTitle') state.periodDraft.title = e.target.value;
+      else if (f === 'pNote') state.periodDraft.note = e.target.value;
+      else if (f === 'pStartDay') state.periodDraft.startDay = e.target.value;
+      else if (f === 'pEndDay') state.periodDraft.endDay = e.target.value;
+    }
+  });
+
+  // selects / checkboxes: safe to re-render
+  root.addEventListener('change', function (e) {
+    var f = e.target.getAttribute && e.target.getAttribute('data-field');
+    if (!f) return;
+    if (f === 'addCategory') { state.addCategoryId = e.target.value; persist(); }
+    else if (f === 'editCategory') { if (state.editorId) { updateItem(state.editorId, { categoryId: e.target.value }); render(); } }
+    else if (f === 'palette') { state.palette = e.target.value; persist(); render(); }
+    else if (f === 'showBalance') { state.showBalance = e.target.checked; persist(); render(); }
+    else if (f === 'compact') { state.compact = e.target.checked; persist(); render(); }
+    else if (state.periodDraft) {
+      if (f === 'pType') { state.periodDraft.type = e.target.value; render(); }
+      else if (f === 'pStartMonth') { state.periodDraft.startMonth = parseInt(e.target.value, 10); render(); }
+      else if (f === 'pEndMonth') { state.periodDraft.endMonth = parseInt(e.target.value, 10); render(); }
+      else if (f === 'pStartDay') { state.periodDraft.startDay = e.target.value; render(); }
+      else if (f === 'pEndDay') { state.periodDraft.endDay = e.target.value; render(); }
+    }
+  });
+
+  root.addEventListener('keydown', function (e) {
+    var f = e.target.getAttribute && e.target.getAttribute('data-field');
+    if (f === 'addTitle' && e.key === 'Enter') addItem();
+    if (e.key === 'Escape' && state.editorId) { state.editorId = null; render(); }
+    if (e.key === 'Escape' && state.periodEditorId) closePeriod();
+  });
+
+  render();
+  cloudPull();
+})();
+</script>
+</body>
+</html>
