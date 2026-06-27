@@ -66,8 +66,8 @@
   // ----------------------------------------------------------- Supabase sync
   // The anon key is meant to be public (it only grants what RLS allows).
   // Paste your project's values here, then commit + redeploy.
-  var SUPABASE_URL = '__SUPABASE_URL__';
-  var SUPABASE_ANON_KEY = '__SUPABASE_ANON_KEY__';
+  var SUPABASE_URL = 'https://gvqhwsclloqrwmktqfra.supabase.co/rest/v1/';
+  var SUPABASE_ANON_KEY = 'sb_publishable_0Ok46boxS4xLFUbWaGOOLw_2i1YzHai';
   var CLOUD_ROW_ID = 'singleton'; // single shared dataset (no login)
   var sb = (window.supabase && SUPABASE_URL.indexOf('http') === 0)
     ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
