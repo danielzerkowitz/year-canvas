@@ -324,7 +324,7 @@
     return { m: m, d: o };
   }
   function shadeTint(color) { return 'color-mix(in oklab, ' + color + ' 15%, #ffffff)'; }
-  function shadeBand(color) { return 'color-mix(in oklab, ' + color + ' 45%, #ffffff)'; } // 25%-band overlay color
+  function shadeBand(color) { return 'color-mix(in oklab, ' + color + ' 45%, #ffffff)'; } // left-25% band overlay color
   function clampDay(m, d) { d = parseInt(d, 10); if (isNaN(d) || d < 1) d = 1; if (d > DIM[m]) d = DIM[m]; return d; }
   function spanDays(sm, sd, em, ed) { return ord(em, ed) - ord(sm, sd) + 1; }
   function formatSpan(sm, sd, em, ed) {
@@ -498,7 +498,7 @@
         var od = valid ? ord(m, d) : 0;
 
         // shaded-category items: full shades tint the whole cell; quarter shades draw a
-        // thin band at the bottom that layers over a full shade. Both label the start day.
+        // thin band down the left 25% that layers over a full shade. Both label the start day.
         // normal items: full chip on the start day, continuation bar otherwise.
         var coverColor = null, bandColor = null, shadeLabels = [], cellItems = [];
         if (valid) {
@@ -518,7 +518,7 @@
 
         var base = !valid ? '#DBDDE1' : (coverColor ? shadeTint(coverColor) : (weekend ? '#F1F2F4' : '#FFFFFF'));
         var bg = bandColor
-          ? 'linear-gradient(to top, ' + shadeBand(bandColor) + ' 0%, ' + shadeBand(bandColor) + ' 25%, transparent 25%, transparent 100%), ' + base
+          ? 'linear-gradient(to right, ' + shadeBand(bandColor) + ' 0%, ' + shadeBand(bandColor) + ' 25%, transparent 25%, transparent 100%), ' + base
           : base;
         cells.push({
           valid: valid, items: cellItems, shadeLabels: shadeLabels, bg: bg, m: m, d: d,
@@ -694,7 +694,7 @@
             +   '<span data-action="toggle" data-id="' + esc(cat.id) + '" style="flex:0 0 auto; width:15px; height:15px; border-radius:4px; display:flex; align-items:center; justify-content:center; cursor:pointer; background:' + cat.swatchBg + '; border:1.5px solid ' + cat.swatchBorder + ';">'
             +     '<span style="color:#fff; font-size:10px; font-weight:800; line-height:1;">' + cat.mark + '</span>'
             +   '</span>'
-            +   '<span data-action="toggle" data-id="' + esc(cat.id) + '" style="flex:1; cursor:pointer; font-size:13.5px; font-weight:600; color:' + cat.textColor + ';">' + esc(cat.name) + (cat.shade ? ' <span title="' + (cat.partial ? 'Shades a quarter band (layers over full-day shades)' : 'Shades the whole day') + '" style="font-weight:400; color:#B7BCC5; font-size:11px;">' + (cat.partial ? '▂' : '▦') + '</span>' : '') + '</span>'
+            +   '<span data-action="toggle" data-id="' + esc(cat.id) + '" style="flex:1; cursor:pointer; font-size:13.5px; font-weight:600; color:' + cat.textColor + ';">' + esc(cat.name) + (cat.shade ? ' <span title="' + (cat.partial ? 'Shades a quarter band (layers over full-day shades)' : 'Shades the whole day') + '" style="font-weight:400; color:#B7BCC5; font-size:11px;">' + (cat.partial ? '▎' : '▦') + '</span>' : '') + '</span>'
             +   '<span class="cat-edit" data-action="edit-cat" data-id="' + esc(cat.id) + '" title="Edit category" style="flex:0 0 auto; font-size:12px; color:#B0B5BE;">✎</span>'
             +   '<span style="flex:0 0 auto; font-size:11px; color:#B7BCC5; font-weight:600;">' + cat.count + '</span>'
             + '</div>';
@@ -854,7 +854,7 @@
       if (ce.shade) {
         html += '<div style="margin-top:13px; display:flex; flex-direction:column; gap:10px; padding:12px 13px; background:#FAFAFB; border:1px solid #EEEFF2; border-radius:11px;">'
               +   '<label class="topbar-ctl" style="display:flex; align-items:center; gap:9px; font-size:13px; font-weight:600; color:#2A2E38; user-select:none;"><input type="radio" name="shadeAmt" data-field="catShadeAmt" value="full"' + (ce.partial ? '' : ' checked') + ' /> Whole day</label>'
-              +   '<label class="topbar-ctl" style="display:flex; align-items:flex-start; gap:9px; font-size:13px; font-weight:600; color:#2A2E38; user-select:none;"><input type="radio" name="shadeAmt" data-field="catShadeAmt" value="quarter"' + (ce.partial ? ' checked' : '') + ' style="margin-top:2px; flex:0 0 auto;" /><span>Quarter band <span style="font-weight:400; color:#9AA0AB;">— a thin strip at the bottom that layers on top of full-day shades, so an overlapping vacation stays visible</span></span></label>'
+              +   '<label class="topbar-ctl" style="display:flex; align-items:flex-start; gap:9px; font-size:13px; font-weight:600; color:#2A2E38; user-select:none;"><input type="radio" name="shadeAmt" data-field="catShadeAmt" value="quarter"' + (ce.partial ? ' checked' : '') + ' style="margin-top:2px; flex:0 0 auto;" /><span>Quarter band <span style="font-weight:400; color:#9AA0AB;">— a thin strip down the left that layers on top of full-day shades, so an overlapping vacation stays visible</span></span></label>'
               + '</div>';
       }
       if (ce.id && ce.refCount > 0) {
