@@ -69,7 +69,8 @@
   // ----------------------------------------------------------- Supabase sync
   // The anon key is meant to be public (it only grants what RLS allows).
   // Paste your project's values here, then commit + redeploy.
-  var SUPABASE_URL = 'https://gvqhwsclloqrwmktqfra.supabase.co/rest/v1/';
+  // Bare project URL — the supabase-js client appends /rest/v1/ itself.
+  var SUPABASE_URL = 'https://gvqhwsclloqrwmktqfra.supabase.co';
   var SUPABASE_ANON_KEY = 'sb_publishable_0Ok46boxS4xLFUbWaGOOLw_2i1YzHai';
   var CLOUD_ROW_ID = 'singleton'; // single shared dataset (no login)
   var sb = (window.supabase && SUPABASE_URL.indexOf('http') === 0)
@@ -108,7 +109,7 @@
       { id:'c_travel', name:'Travel' },
       { id:'c_personal', name:'Personal' },
       { id:'c_vacation', name:'Vacation', color:COLOR_VACATION, shade:true },
-      { id:'c_holiday', name:'Public holiday', color:COLOR_HOLIDAY, shade:true },
+      { id:'c_holiday', name:'Public holiday', color:COLOR_HOLIDAY, shade:true, partial:true },
     ];
     var items = [
       // ---- backlog (month: null) ----
@@ -154,7 +155,8 @@
       id: c.id || ('c_' + Date.now()),
       name: c.name || 'Category',
       color: (c.color && typeof c.color === 'object') ? c.color : null,
-      shade: !!c.shade
+      shade: !!c.shade,
+      partial: !!c.partial // shade only a 25% band (layers over full-day shades)
     };
   }
 
@@ -322,6 +324,7 @@
     return { m: m, d: o };
   }
   function shadeTint(color) { return 'color-mix(in oklab, ' + color + ' 15%, #ffffff)'; }
+  function shadeBand(color) { return 'color-mix(in oklab, ' + color + ' 45%, #ffffff)'; } // 25%-band overlay color
   function clampDay(m, d) { d = parseInt(d, 10); if (isNaN(d) || d < 1) d = 1; if (d > DIM[m]) d = DIM[m]; return d; }
   function spanDays(sm, sd, em, ed) { return ord(em, ed) - ord(sm, sd) + 1; }
   function formatSpan(sm, sd, em, ed) {
@@ -401,23 +404,24 @@
     return SWATCHES[state.categories.length % SWATCHES.length];
   }
   function openCatNew() {
-    state.catEditor = { id: null, name: '', color: nextSwatch(), shade: false };
+    state.catEditor = { id: null, name: '', color: nextSwatch(), shade: false, partial: false };
     state.editorId = null; render();
   }
   function openCatEdit(id) {
     var c = catById(id);
     if (!c) return;
-    state.catEditor = { id: id, name: c.name, color: catColorObj(id), shade: !!c.shade };
+    state.catEditor = { id: id, name: c.name, color: catColorObj(id), shade: !!c.shade, partial: !!c.partial };
     state.editorId = null; render();
   }
   function closeCat() { state.catEditor = null; render(); }
   function saveCat() {
     var ce = state.catEditor; if (!ce) return;
     var name = (ce.name || '').trim() || 'Category';
-    if (ce.id) state.categories = state.categories.map(function (c) { return c.id === ce.id ? Object.assign({}, c, { name: name, color: ce.color, shade: !!ce.shade }) : c; });
+    var partial = !!ce.shade && !!ce.partial; // partial only meaningful when shading
+    if (ce.id) state.categories = state.categories.map(function (c) { return c.id === ce.id ? Object.assign({}, c, { name: name, color: ce.color, shade: !!ce.shade, partial: partial }) : c; });
     else {
       var id = 'c_' + Date.now();
-      state.categories = state.categories.concat([{ id: id, name: name, color: ce.color, shade: !!ce.shade }]);
+      state.categories = state.categories.concat([{ id: id, name: name, color: ce.color, shade: !!ce.shade, partial: partial }]);
       state.pv = Object.assign({}, state.pv); state.pv[id] = true;
     }
     state.catEditor = null; persist(); render();
@@ -468,7 +472,7 @@
       var hi = ord(em, ed);
       if (hi < lo) { var t = lo; lo = hi; hi = t; }
       var cat = catById(it.categoryId);
-      sched.push({ lo: lo, hi: hi, view: itemView(it), id: it.id, title: it.title, shade: !!(cat && cat.shade), color: catColor(it.categoryId) });
+      sched.push({ lo: lo, hi: hi, view: itemView(it), id: it.id, title: it.title, shade: !!(cat && cat.shade), partial: !!(cat && cat.partial), color: catColor(it.categoryId) });
     });
 
     var backlogItems = vis.filter(function (it) { return it.month == null; }).map(itemView);
@@ -493,16 +497,18 @@
         var isToday = valid && m === TODAY_M && d === TODAY_D;
         var od = valid ? ord(m, d) : 0;
 
-        // shaded-category items: tint covered cells, label on the start day only
-        // normal items: full chip on the start day, continuation bar otherwise
-        var coverColor = null, shadeLabels = [], cellItems = [];
+        // shaded-category items: full shades tint the whole cell; quarter shades draw a
+        // thin band at the bottom that layers over a full shade. Both label the start day.
+        // normal items: full chip on the start day, continuation bar otherwise.
+        var coverColor = null, bandColor = null, shadeLabels = [], cellItems = [];
         if (valid) {
           for (var si = 0; si < sched.length; si++) {
             var s = sched[si];
             if (s.lo <= od && od <= s.hi) {
               if (s.shade) {
-                if (!coverColor) coverColor = s.color;
-                if (od === s.lo) shadeLabels.push({ id: s.id, title: s.title, color: s.color });
+                if (s.partial) { if (!bandColor) bandColor = s.color; }
+                else if (!coverColor) coverColor = s.color;
+                if (od === s.lo) shadeLabels.push({ id: s.id, title: s.title, color: s.color, partial: s.partial });
               } else {
                 cellItems.push({ v: s.view, start: od === s.lo });
               }
@@ -510,7 +516,10 @@
           }
         }
 
-        var bg = !valid ? '#DBDDE1' : (coverColor ? shadeTint(coverColor) : (weekend ? '#F1F2F4' : '#FFFFFF'));
+        var base = !valid ? '#DBDDE1' : (coverColor ? shadeTint(coverColor) : (weekend ? '#F1F2F4' : '#FFFFFF'));
+        var bg = bandColor
+          ? 'linear-gradient(to top, ' + shadeBand(bandColor) + ' 0%, ' + shadeBand(bandColor) + ' 25%, transparent 25%, transparent 100%), ' + base
+          : base;
         cells.push({
           valid: valid, items: cellItems, shadeLabels: shadeLabels, bg: bg, m: m, d: d,
           ring: isToday ? 'inset 0 0 0 2px ' + ACCENT_BORDER : 'none'
@@ -523,7 +532,7 @@
       var on = S.pv[c.id] !== false;
       var color = catColor(c.id);
       return {
-        id: c.id, name: c.name, count: catCount[c.id] || 0, shade: !!c.shade,
+        id: c.id, name: c.name, count: catCount[c.id] || 0, shade: !!c.shade, partial: !!c.partial,
         swatchBg: on ? color : '#fff',
         swatchBorder: on ? color : '#C9CDD5',
         mark: on ? '✓' : '',
@@ -568,7 +577,7 @@
       var ce = state.catEditor;
       var refCount = ce.id ? S.items.filter(function (it) { return it.categoryId === ce.id; }).length : 0;
       catEd = {
-        id: ce.id, isNew: !ce.id, name: ce.name, shade: !!ce.shade,
+        id: ce.id, isNew: !ce.id, name: ce.name, shade: !!ce.shade, partial: !!ce.partial,
         colorStr: oklchStr(ce.color),
         title: (ce.id ? 'Edit category' : 'New category'),
         deletable: !!ce.id && S.categories.length > 1,
@@ -685,7 +694,7 @@
             +   '<span data-action="toggle" data-id="' + esc(cat.id) + '" style="flex:0 0 auto; width:15px; height:15px; border-radius:4px; display:flex; align-items:center; justify-content:center; cursor:pointer; background:' + cat.swatchBg + '; border:1.5px solid ' + cat.swatchBorder + ';">'
             +     '<span style="color:#fff; font-size:10px; font-weight:800; line-height:1;">' + cat.mark + '</span>'
             +   '</span>'
-            +   '<span data-action="toggle" data-id="' + esc(cat.id) + '" style="flex:1; cursor:pointer; font-size:13.5px; font-weight:600; color:' + cat.textColor + ';">' + esc(cat.name) + (cat.shade ? ' <span title="Shades the whole day" style="font-weight:400; color:#B7BCC5; font-size:11px;">▦</span>' : '') + '</span>'
+            +   '<span data-action="toggle" data-id="' + esc(cat.id) + '" style="flex:1; cursor:pointer; font-size:13.5px; font-weight:600; color:' + cat.textColor + ';">' + esc(cat.name) + (cat.shade ? ' <span title="' + (cat.partial ? 'Shades a quarter band (layers over full-day shades)' : 'Shades the whole day') + '" style="font-weight:400; color:#B7BCC5; font-size:11px;">' + (cat.partial ? '▂' : '▦') + '</span>' : '') + '</span>'
             +   '<span class="cat-edit" data-action="edit-cat" data-id="' + esc(cat.id) + '" title="Edit category" style="flex:0 0 auto; font-size:12px; color:#B0B5BE;">✎</span>'
             +   '<span style="flex:0 0 auto; font-size:11px; color:#B7BCC5; font-weight:600;">' + cat.count + '</span>'
             + '</div>';
@@ -840,8 +849,14 @@
         html += '<span class="swatch" data-action="pick-swatch" data-idx="' + sw.idx + '" style="width:26px; height:26px; border-radius:7px; cursor:pointer; background:' + sw.str + '; transition:transform .1s; box-shadow:' + (sw.sel ? '0 0 0 2px #fff, 0 0 0 4px ' + sw.str : 'inset 0 0 0 1px rgba(0,0,0,.06)') + ';"></span>';
       });
       html += '</div>'
-            +       '<label class="topbar-ctl" style="display:flex; align-items:center; gap:9px; margin-top:18px; font-size:13.5px; font-weight:600; color:#2A2E38; user-select:none;"><input type="checkbox" data-field="catShade"' + (ce.shade ? ' checked' : '') + ' /> Shade the whole day</label>'
+            +       '<label class="topbar-ctl" style="display:flex; align-items:center; gap:9px; margin-top:18px; font-size:13.5px; font-weight:600; color:#2A2E38; user-select:none;"><input type="checkbox" data-field="catShade"' + (ce.shade ? ' checked' : '') + ' /> Shade the day instead of a chip</label>'
             +       '<div style="font-size:12px; color:#B0B5BE; font-weight:500; margin-top:5px;">For holidays, vacations &amp; time off — events tint the day instead of showing a chip.</div>';
+      if (ce.shade) {
+        html += '<div style="margin-top:13px; display:flex; flex-direction:column; gap:10px; padding:12px 13px; background:#FAFAFB; border:1px solid #EEEFF2; border-radius:11px;">'
+              +   '<label class="topbar-ctl" style="display:flex; align-items:center; gap:9px; font-size:13px; font-weight:600; color:#2A2E38; user-select:none;"><input type="radio" name="shadeAmt" data-field="catShadeAmt" value="full"' + (ce.partial ? '' : ' checked') + ' /> Whole day</label>'
+              +   '<label class="topbar-ctl" style="display:flex; align-items:flex-start; gap:9px; font-size:13px; font-weight:600; color:#2A2E38; user-select:none;"><input type="radio" name="shadeAmt" data-field="catShadeAmt" value="quarter"' + (ce.partial ? ' checked' : '') + ' style="margin-top:2px; flex:0 0 auto;" /><span>Quarter band <span style="font-weight:400; color:#9AA0AB;">— a thin strip at the bottom that layers on top of full-day shades, so an overlapping vacation stays visible</span></span></label>'
+              + '</div>';
+      }
       if (ce.id && ce.refCount > 0) {
         html += '<div style="font-size:12px; color:#B0B5BE; font-weight:500; margin-top:14px;">Deleting moves its ' + ce.refCount + ' ' + ce.refLabel + ' to another category.</div>';
       }
@@ -947,7 +962,8 @@
     else if (f === 'editEndMonth') { if (state.editorId) updateItemDates(state.editorId, 'endMonth', e.target.value, true); }
     else if (f === 'editStartDay') { if (state.editorId) updateItemDates(state.editorId, 'startDay', e.target.value, true); }
     else if (f === 'editEndDay') { if (state.editorId) updateItemDates(state.editorId, 'endDay', e.target.value, true); }
-    else if (f === 'catShade') { if (state.catEditor) state.catEditor.shade = e.target.checked; }
+    else if (f === 'catShade') { if (state.catEditor) { state.catEditor.shade = e.target.checked; render(); } }
+    else if (f === 'catShadeAmt') { if (state.catEditor) { state.catEditor.partial = (e.target.value === 'quarter'); render(); } }
     else if (f === 'palette') { state.palette = e.target.value; persist(); render(); }
     else if (f === 'showBalance') { state.showBalance = e.target.checked; persist(); render(); }
     else if (f === 'compact') { state.compact = e.target.checked; persist(); render(); }
