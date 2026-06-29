@@ -25,17 +25,20 @@
   /* hover states (ported from style-hover in the design) */
   .backlog-item:hover { border-color:#DCDEE5 !important; box-shadow:0 2px 6px rgba(16,24,40,.07) !important; }
   .chip:hover { filter:brightness(0.97); }
+  .chip-cont:hover { filter:brightness(0.96); }
   .add-btn:hover { background:#33384a !important; }
   .cat-row:hover { background:#FAFAFB; }
-  .layer-row:hover { background:#FAFAFB; }
   .reset-btn:hover { color:#6B7280 !important; }
-  .addperiod-btn:hover { background:#F3F4F6 !important; }
+  .subadd-btn:hover { background:#F3F4F6 !important; }
   .range-label:hover { filter:brightness(0.94); }
-  .period-row:hover { border-color:#DCDEE5 !important; box-shadow:0 2px 6px rgba(16,24,40,.07); }
   .done-btn:hover { background:#33384a !important; }
   .tobacklog-btn:hover { background:#F3F4F6 !important; }
   .delete-btn:hover { color:#96281c !important; }
   .topbar-ctl { cursor:pointer; }
+  .cat-edit { opacity:0; transition:opacity .12s; cursor:pointer; }
+  .cat-row:hover .cat-edit { opacity:1; }
+  .cat-edit:hover { color:#5A606C !important; }
+  .swatch:hover { transform:scale(1.1); }
 
   /* drag-over highlight (applied directly to drop targets during a drag) */
   .cell.hot { background: rgba(74,110,210,.14) !important; }
@@ -73,21 +76,39 @@
     ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
     : null;
 
-  // each palette maps a category id to an oklch color {l,c,h}
+  // each palette maps a default category id to an oklch color {l,c,h}.
+  // Custom categories carry their own .color and ignore the palette.
   var PALETTES = {
     default: { c_work:{l:0.62,c:0.165,h:252}, c_health:{l:0.70,c:0.165,h:150}, c_home:{l:0.74,c:0.155,h:66}, c_travel:{l:0.64,c:0.190,h:18}, c_personal:{l:0.60,c:0.180,h:300} },
     cool:    { c_work:{l:0.60,c:0.110,h:248}, c_health:{l:0.66,c:0.100,h:192}, c_home:{l:0.63,c:0.095,h:222}, c_travel:{l:0.60,c:0.110,h:300}, c_personal:{l:0.58,c:0.105,h:276} },
     warm:    { c_work:{l:0.62,c:0.120,h:30},  c_health:{l:0.65,c:0.110,h:135}, c_home:{l:0.70,c:0.125,h:62}, c_travel:{l:0.62,c:0.130,h:8},  c_personal:{l:0.62,c:0.120,h:330} },
   };
 
+  // selectable swatches for custom category colors
+  var SWATCHES = [
+    {l:0.62,c:0.165,h:252}, {l:0.70,c:0.165,h:150}, {l:0.74,c:0.155,h:66},  {l:0.64,c:0.190,h:18},
+    {l:0.60,c:0.180,h:300}, {l:0.66,c:0.130,h:200}, {l:0.67,c:0.155,h:45},  {l:0.64,c:0.120,h:225},
+    {l:0.62,c:0.160,h:330}, {l:0.58,c:0.140,h:280}, {l:0.70,c:0.150,h:110}, {l:0.62,c:0.140,h:170}
+  ];
+
+  // seed colors used when migrating legacy holidays / vacations into shaded categories
+  var COLOR_VACATION = {l:0.64,c:0.12,h:225};
+  var COLOR_HOLIDAY  = {l:0.67,c:0.155,h:45};
+
+  function oklchStr(c) { return 'oklch(' + c.l + ' ' + c.c + ' ' + c.h + ')'; }
+  function sameColor(a, b) { return !!a && !!b && a.l === b.l && a.c === b.c && a.h === b.h; }
+
   // ----------------------------------------------------------------- defaults
   function buildDefault() {
+    // a "shaded" category tints the whole day (for holidays, vacations, time off)
     var categories = [
       { id:'c_work', name:'Work' },
       { id:'c_health', name:'Health' },
       { id:'c_home', name:'Home' },
       { id:'c_travel', name:'Travel' },
       { id:'c_personal', name:'Personal' },
+      { id:'c_vacation', name:'Vacation', color:COLOR_VACATION, shade:true },
+      { id:'c_holiday', name:'Public holiday', color:COLOR_HOLIDAY, shade:true },
     ];
     var items = [
       // ---- backlog (month: null) ----
@@ -103,13 +124,13 @@
       { id:'it_10', title:'Sketch podcast rebrand', categoryId:'c_work', note:'', month:null, day:null },
       { id:'it_11', title:'Research standing desk', categoryId:'c_personal', note:'', month:null, day:null },
       { id:'it_12', title:'Declutter the closet', categoryId:'c_home', note:'', month:null, day:null },
-      // ---- scheduled (month + day) ----
+      // ---- scheduled (month + day; optional endMonth/endDay for multi-day) ----
       { id:'it_13', title:'Ship v2 release', categoryId:'c_work', note:'Feature freeze first', month:5, day:22 },
       { id:'it_14', title:'Kitchen reno quotes', categoryId:'c_home', note:'', month:5, day:5 },
       { id:'it_15', title:'Strength PR test', categoryId:'c_health', note:'', month:5, day:28 },
-      { id:'it_16', title:'Garage epoxy floor', categoryId:'c_home', note:'2-day cure', month:6, day:1 },
+      { id:'it_16', title:'Garage epoxy floor', categoryId:'c_home', note:'2-day cure', month:6, day:1, endMonth:6, endDay:2 },
       { id:'it_17', title:'Q3 planning', categoryId:'c_work', note:'', month:6, day:14 },
-      { id:'it_18', title:'Family beach week', categoryId:'c_travel', note:'', month:7, day:19 },
+      { id:'it_18', title:'Family beach week', categoryId:'c_travel', note:'', month:7, day:19, endMonth:7, endDay:25 },
       { id:'it_19', title:'Podcast live event', categoryId:'c_work', note:'Venue TBD', month:8, day:12 },
       { id:'it_20', title:'Half marathon', categoryId:'c_health', note:'', month:9, day:11 },
       { id:'it_21', title:'Conference talk', categoryId:'c_work', note:'', month:10, day:6 },
@@ -117,33 +138,73 @@
       { id:'it_23', title:'Kickoff planning', categoryId:'c_work', note:'', month:0, day:7 },
       { id:'it_24', title:'Garden beds', categoryId:'c_home', note:'', month:3, day:20 },
       { id:'it_25', title:'Year review', categoryId:'c_work', note:'', month:11, day:12 },
-    ];
-    // ---- periods: multi-day vacations & public holidays (start/end inclusive) ----
-    var ranges = [
-      { id:'r_1', title:'Easter holiday', type:'holiday',  startMonth:2, startDay:30, endMonth:3, endDay:12, note:'School break' },
-      { id:'r_2', title:'Easter Monday',  type:'holiday',  startMonth:3, startDay:6,  endMonth:3, endDay:6,  note:'Bank holiday' },
-      { id:'r_3', title:'Summer vacation', type:'vacation', startMonth:7, startDay:3,  endMonth:7, endDay:16, note:'' },
-      { id:'r_4', title:"New Year's Day",  type:'holiday',  startMonth:0, startDay:1,  endMonth:0, endDay:1,  note:'' },
+      // ---- holidays & vacations are just shaded-category items now ----
+      { id:'r_1', title:'Easter holiday', categoryId:'c_holiday', note:'School break', month:2, day:30, endMonth:3, endDay:12 },
+      { id:'r_2', title:'Easter Monday', categoryId:'c_holiday', note:'Bank holiday', month:3, day:6, endMonth:3, endDay:6 },
+      { id:'r_3', title:'Summer vacation', categoryId:'c_vacation', note:'', month:7, day:3, endMonth:7, endDay:16 },
+      { id:'r_4', title:"New Year's Day", categoryId:'c_holiday', note:'', month:0, day:1, endMonth:0, endDay:1 },
     ];
     var pv = {};
     categories.forEach(function (c) { pv[c.id] = true; });
-    return { categories: categories, items: items, pv: pv, ranges: ranges };
+    return { categories: categories, items: items, pv: pv };
   }
 
-  function normalizeRange(r) {
-    var sm = (r.startMonth | 0), em = (r.endMonth | 0);
-    if (sm < 0) sm = 0; if (sm > 11) sm = 11;
-    if (em < 0) em = 0; if (em > 11) em = 11;
-    var sd = r.startDay, ed = r.endDay;
-    sd = Math.min(Math.max(parseInt(sd, 10) || 1, 1), DIM[sm]);
-    ed = Math.min(Math.max(parseInt(ed, 10) || 1, 1), DIM[em]);
+  function normCat(c) {
     return {
-      id: r.id || ('r_' + Date.now()),
-      title: r.title || 'Untitled',
-      type: r.type === 'vacation' ? 'vacation' : 'holiday',
-      startMonth: sm, startDay: sd, endMonth: em, endDay: ed,
-      note: r.note || ''
+      id: c.id || ('c_' + Date.now()),
+      name: c.name || 'Category',
+      color: (c.color && typeof c.color === 'object') ? c.color : null,
+      shade: !!c.shade
     };
+  }
+
+  function normalizeItem(it) {
+    var d = it.day;
+    if (it.month != null && d == null) d = 1;
+    if (d != null && d > 31) d = 31;
+    var month = (it.month == null ? null : it.month);
+    var day = (it.month == null ? null : d);
+    var endMonth = null, endDay = null;
+    if (month != null && it.endMonth != null) {
+      endMonth = it.endMonth; endDay = (it.endDay == null ? day : it.endDay);
+      if (endDay > 31) endDay = 31;
+    }
+    return {
+      id: it.id, title: it.title, categoryId: it.categoryId, note: it.note || '',
+      month: month, day: day, endMonth: endMonth, endDay: endDay
+    };
+  }
+
+  // one-time migration: legacy holidays lived in `ranges` with their own `rangeCats`.
+  // Fold each range into a regular item under a shaded category, then drop ranges.
+  function foldRanges(categories, items, pv, rangeCats, ranges) {
+    if (!Array.isArray(ranges) || !ranges.length) return { categories: categories, items: items, pv: pv };
+    categories = categories.slice(); items = items.slice(); pv = Object.assign({}, pv);
+    rangeCats = Array.isArray(rangeCats) ? rangeCats : [];
+    var hasCat = {}; categories.forEach(function (c) { hasCat[c.id] = true; });
+    var hasItem = {}; items.forEach(function (it) { hasItem[it.id] = true; });
+    function ensureCat(catId, type) {
+      if (hasCat[catId]) return;
+      var rc = rangeCats.find(function (c) { return c.id === catId; });
+      var name = rc ? rc.name : (type === 'vacation' ? 'Vacation' : 'Public holiday');
+      var color = (rc && rc.color) ? rc.color : (type === 'vacation' ? COLOR_VACATION : COLOR_HOLIDAY);
+      categories.push({ id: catId, name: name, color: color, shade: true });
+      pv[catId] = true; hasCat[catId] = true;
+    }
+    ranges.forEach(function (r) {
+      var type = r.type || (r.catId === 'rc_vacation' ? 'vacation' : 'holiday');
+      var catId = r.catId || (type === 'vacation' ? 'rc_vacation' : 'rc_holiday');
+      ensureCat(catId, type);
+      if (hasItem[r.id]) return;
+      var planned = r.startMonth != null && r.startDay != null && r.endMonth != null && r.endDay != null;
+      items.push({
+        id: r.id, title: r.title || 'Untitled', categoryId: catId, note: r.note || '',
+        month: planned ? r.startMonth : null, day: planned ? r.startDay : null,
+        endMonth: planned ? r.endMonth : null, endDay: planned ? r.endDay : null
+      });
+      hasItem[r.id] = true;
+    });
+    return { categories: categories, items: items, pv: pv };
   }
 
   function loadState() {
@@ -152,36 +213,28 @@
       draggingId: null, editorId: null,
       addTitle: '', addCategoryId: 'c_work',
       palette: 'default', compact: false, showBalance: true,
-      showVacations: true, showHolidays: true,
-      periodEditorId: null, periodDraft: null,
+      catEditor: null,
     };
     try {
       var raw = localStorage.getItem(STORE);
       if (raw) {
         var s = JSON.parse(raw);
-        if (s.items && s.items[0] && ('categoryId' in s.items[0])) {
-          base.items = s.items.map(function (it) {
-            var d = it.day;
-            if (it.month != null && d == null) d = 1;
-            if (d != null && d > 31) d = 31;
-            return {
-              id: it.id, title: it.title, categoryId: it.categoryId,
-              note: it.note || '',
-              month: (it.month == null ? null : it.month),
-              day: (it.month == null ? null : d)
-            };
-          });
-        }
+        if (Array.isArray(s.categories) && s.categories.length) base.categories = s.categories.map(normCat);
+        if (s.items && s.items[0] && ('categoryId' in s.items[0])) base.items = s.items.map(normalizeItem);
+        base.pv = {}; base.categories.forEach(function (c) { base.pv[c.id] = true; });
         if (s.pv) base.pv = Object.assign(base.pv, s.pv);
-        if (Array.isArray(s.ranges)) base.ranges = s.ranges.map(normalizeRange);
+        // migrate legacy holidays (ranges) into shaded-category items
+        var folded = foldRanges(base.categories, base.items, base.pv, s.rangeCats, s.ranges);
+        base.categories = folded.categories; base.items = folded.items; base.pv = folded.pv;
         if (s.addCategoryId) runtime.addCategoryId = s.addCategoryId;
         if (s.palette && PALETTES[s.palette]) runtime.palette = s.palette;
         if (typeof s.compact === 'boolean') runtime.compact = s.compact;
         if (typeof s.showBalance === 'boolean') runtime.showBalance = s.showBalance;
-        if (typeof s.showVacations === 'boolean') runtime.showVacations = s.showVacations;
-        if (typeof s.showHolidays === 'boolean') runtime.showHolidays = s.showHolidays;
       }
     } catch (e) {}
+    if (!base.categories.some(function (c) { return c.id === runtime.addCategoryId; })) {
+      runtime.addCategoryId = base.categories[0] ? base.categories[0].id : 'c_work';
+    }
     return Object.assign(base, runtime);
   }
 
@@ -189,9 +242,9 @@
 
   function snapshot() {
     return {
-      items: state.items, pv: state.pv, ranges: state.ranges, addCategoryId: state.addCategoryId,
-      palette: state.palette, compact: state.compact, showBalance: state.showBalance,
-      showVacations: state.showVacations, showHolidays: state.showHolidays
+      categories: state.categories,
+      items: state.items, pv: state.pv, addCategoryId: state.addCategoryId,
+      palette: state.palette, compact: state.compact, showBalance: state.showBalance
     };
   }
 
@@ -214,26 +267,20 @@
   }
 
   function applyRemote(s) {
-    if (s.items && s.items[0] && ('categoryId' in s.items[0])) {
-      state.items = s.items.map(function (it) {
-        var d = it.day;
-        if (it.month != null && d == null) d = 1;
-        if (d != null && d > 31) d = 31;
-        return {
-          id: it.id, title: it.title, categoryId: it.categoryId, note: it.note || '',
-          month: (it.month == null ? null : it.month),
-          day: (it.month == null ? null : d)
-        };
-      });
-    }
-    if (s.pv) state.pv = Object.assign({}, state.pv, s.pv);
-    if (Array.isArray(s.ranges)) state.ranges = s.ranges.map(normalizeRange);
+    if (Array.isArray(s.categories) && s.categories.length) state.categories = s.categories.map(normCat);
+    if (s.items && s.items[0] && ('categoryId' in s.items[0])) state.items = s.items.map(normalizeItem);
+    var pv = {}; state.categories.forEach(function (c) { pv[c.id] = true; });
+    state.pv = Object.assign(pv, s.pv || {});
+    // migrate legacy holidays (ranges) coming from an older client
+    var folded = foldRanges(state.categories, state.items, state.pv, s.rangeCats, s.ranges);
+    state.categories = folded.categories; state.items = folded.items; state.pv = folded.pv;
     if (s.addCategoryId) state.addCategoryId = s.addCategoryId;
     if (s.palette && PALETTES[s.palette]) state.palette = s.palette;
     if (typeof s.compact === 'boolean') state.compact = s.compact;
     if (typeof s.showBalance === 'boolean') state.showBalance = s.showBalance;
-    if (typeof s.showVacations === 'boolean') state.showVacations = s.showVacations;
-    if (typeof s.showHolidays === 'boolean') state.showHolidays = s.showHolidays;
+    if (!state.categories.some(function (c) { return c.id === state.addCategoryId; })) {
+      state.addCategoryId = state.categories[0] ? state.categories[0].id : 'c_work';
+    }
   }
 
   function cloudPull() {
@@ -252,19 +299,30 @@
   function palette() { return PALETTES[state.palette] || PALETTES.default; }
   function catById(id) { return state.categories.find(function (c) { return c.id === id; }); }
   function catColor(id) {
+    var c = catById(id);
+    if (c && c.color) return oklchStr(c.color);
     var b = palette()[id];
-    if (!b) return '#9AA0AB';
-    return 'oklch(' + b.l + ' ' + b.c + ' ' + b.h + ')';
+    if (b) return oklchStr(b);
+    return '#9AA0AB';
+  }
+  function catColorObj(id) {
+    var c = catById(id);
+    if (c && c.color) return c.color;
+    return palette()[id] || SWATCHES[0];
   }
   function visibleItems() { return state.items.filter(function (it) { return state.pv[it.categoryId] !== false; }); }
   function isWeekend(m, d) { var wd = new Date(YEAR, m, d).getDay(); return wd === 0 || wd === 6; }
 
-  // ----------------------------------------------------------------- periods (ranges)
+  // ----------------------------------------------------------------- dates
   function ord(m, d) { var t = 0; for (var i = 0; i < m; i++) t += DIM[i]; return t + d; } // day-of-year
-  function rangeColor(type) { return type === 'vacation' ? 'oklch(0.64 0.12 225)' : 'oklch(0.67 0.155 45)'; }
-  function rangeTint(color) { return 'color-mix(in oklab, ' + color + ' 15%, #ffffff)'; }
+  function fromOrd(o) {
+    if (o < 1) o = 1; if (o > 365) o = 365;
+    var m = 0;
+    while (m < 11 && o > DIM[m]) { o -= DIM[m]; m++; }
+    return { m: m, d: o };
+  }
+  function shadeTint(color) { return 'color-mix(in oklab, ' + color + ' 15%, #ffffff)'; }
   function clampDay(m, d) { d = parseInt(d, 10); if (isNaN(d) || d < 1) d = 1; if (d > DIM[m]) d = DIM[m]; return d; }
-  function visibleRanges() { return state.ranges.filter(function (r) { return r.type === 'vacation' ? state.showVacations : state.showHolidays; }); }
   function spanDays(sm, sd, em, ed) { return ord(em, ed) - ord(sm, sd) + 1; }
   function formatSpan(sm, sd, em, ed) {
     if (sm === em && sd === ed) return MONTHS_SHORT[sm] + ' ' + sd;
@@ -278,7 +336,7 @@
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
-  // ----------------------------------------------------------------- mutations
+  // ----------------------------------------------------------------- mutations: items
   function updateItem(id, patch) {
     state.items = state.items.map(function (it) { return it.id === id ? Object.assign({}, it, patch) : it; });
     persist();
@@ -294,60 +352,86 @@
   function addItem() {
     var title = (state.addTitle || '').trim();
     if (!title) return;
-    var it = { id: 'it_' + Date.now(), title: title, categoryId: state.addCategoryId, note: '', month: null, day: null };
+    var it = { id: 'it_' + Date.now(), title: title, categoryId: state.addCategoryId, note: '', month: null, day: null, endMonth: null, endDay: null };
     state.items = state.items.concat([it]);
     state.addTitle = '';
     persist(); render();
   }
   function dropToCell(m, d) {
     var id = state.draggingId; if (id == null) return;
-    updateItem(id, { month: m, day: d });
+    // keep an event's duration when it's moved; backlog items land as a single day
+    var it = state.items.find(function (x) { return x.id === id; });
+    var dur = (it && it.month != null) ? spanDays(it.month, it.day, (it.endMonth == null ? it.month : it.endMonth), (it.endDay == null ? it.day : it.endDay)) : 1;
+    var e = fromOrd(ord(m, d) + dur - 1);
+    updateItem(id, { month: m, day: d, endMonth: e.m, endDay: e.d });
     state.draggingId = null; render();
   }
   function dropToBacklog() {
     var id = state.draggingId; if (id == null) return;
-    updateItem(id, { month: null, day: null });
+    updateItem(id, { month: null, day: null, endMonth: null, endDay: null });
     state.draggingId = null; render();
   }
   function deleteItem(id) {
     state.items = state.items.filter(function (it) { return it.id !== id; });
     state.editorId = null; persist(); render();
   }
+  function scheduleItem(id) {
+    updateItem(id, { month: TODAY_M, day: TODAY_D, endMonth: TODAY_M, endDay: TODAY_D });
+    render();
+  }
+  function updateItemDates(id, field, raw, doRender) {
+    var it = state.items.find(function (x) { return x.id === id; });
+    if (!it || it.month == null) return;
+    var sm = it.month, sd = it.day;
+    var em = (it.endMonth == null ? it.month : it.endMonth), ed = (it.endDay == null ? it.day : it.endDay);
+    if (field === 'startMonth') { sm = parseInt(raw, 10); sd = clampDay(sm, sd); }
+    else if (field === 'startDay') { sd = clampDay(sm, raw); }
+    else if (field === 'endMonth') { em = parseInt(raw, 10); ed = clampDay(em, ed); }
+    else if (field === 'endDay') { ed = clampDay(em, raw); }
+    // forgiving: if the end lands before the start, snap the end to the start
+    if (ord(em, ed) < ord(sm, sd)) { em = sm; ed = sd; }
+    updateItem(id, { month: sm, day: sd, endMonth: em, endDay: ed });
+    if (doRender) render();
+  }
 
-  function openPeriodNew() {
-    state.periodEditorId = '__new__';
-    state.periodDraft = { id: null, title: '', type: 'vacation', startMonth: TODAY_M, startDay: TODAY_D, endMonth: TODAY_M, endDay: TODAY_D, note: '' };
+  // ----------------------------------------------------------------- mutations: category management
+  function nextSwatch() {
+    var usedH = state.categories.map(function (c) { return c.color ? c.color.h : null; });
+    for (var i = 0; i < SWATCHES.length; i++) { if (usedH.indexOf(SWATCHES[i].h) === -1) return SWATCHES[i]; }
+    return SWATCHES[state.categories.length % SWATCHES.length];
+  }
+  function openCatNew() {
+    state.catEditor = { id: null, name: '', color: nextSwatch(), shade: false };
     state.editorId = null; render();
   }
-  function openPeriodEdit(id) {
-    var r = state.ranges.find(function (x) { return x.id === id; });
-    if (!r) return;
-    state.periodEditorId = id;
-    state.periodDraft = { id: r.id, title: r.title, type: r.type, startMonth: r.startMonth, startDay: r.startDay, endMonth: r.endMonth, endDay: r.endDay, note: r.note || '' };
+  function openCatEdit(id) {
+    var c = catById(id);
+    if (!c) return;
+    state.catEditor = { id: id, name: c.name, color: catColorObj(id), shade: !!c.shade };
     state.editorId = null; render();
   }
-  function closePeriod() { state.periodEditorId = null; state.periodDraft = null; render(); }
-  function savePeriod() {
-    var pd = state.periodDraft; if (!pd) return;
-    var title = (pd.title || '').trim() || (pd.type === 'vacation' ? 'Vacation' : 'Holiday');
-    var sm = pd.startMonth | 0, em = pd.endMonth | 0;
-    var sd = clampDay(sm, pd.startDay), ed = clampDay(em, pd.endDay);
-    if (ord(em, ed) < ord(sm, sd)) { var tm = sm, td = sd; sm = em; sd = ed; em = tm; ed = td; } // forgiving: swap reversed ranges
-    var rec = { id: pd.id || ('r_' + Date.now()), title: title, type: pd.type, startMonth: sm, startDay: sd, endMonth: em, endDay: ed, note: pd.note || '' };
-    if (pd.id) state.ranges = state.ranges.map(function (r) { return r.id === pd.id ? rec : r; });
-    else state.ranges = state.ranges.concat([rec]);
-    state.periodEditorId = null; state.periodDraft = null;
-    persist(); render();
+  function closeCat() { state.catEditor = null; render(); }
+  function saveCat() {
+    var ce = state.catEditor; if (!ce) return;
+    var name = (ce.name || '').trim() || 'Category';
+    if (ce.id) state.categories = state.categories.map(function (c) { return c.id === ce.id ? Object.assign({}, c, { name: name, color: ce.color, shade: !!ce.shade }) : c; });
+    else {
+      var id = 'c_' + Date.now();
+      state.categories = state.categories.concat([{ id: id, name: name, color: ce.color, shade: !!ce.shade }]);
+      state.pv = Object.assign({}, state.pv); state.pv[id] = true;
+    }
+    state.catEditor = null; persist(); render();
   }
-  function deletePeriod() {
-    var pd = state.periodDraft;
-    if (pd && pd.id) state.ranges = state.ranges.filter(function (r) { return r.id !== pd.id; });
-    state.periodEditorId = null; state.periodDraft = null; persist(); render();
-  }
-  function toggleLayer(layer) {
-    if (layer === 'vacation') state.showVacations = !state.showVacations;
-    else state.showHolidays = !state.showHolidays;
-    persist(); render();
+  function deleteCat() {
+    var ce = state.catEditor; if (!ce || !ce.id) return;
+    if (state.categories.length <= 1) return; // keep at least one
+    var rest = state.categories.filter(function (c) { return c.id !== ce.id; });
+    var fb = rest[0].id;
+    state.items = state.items.map(function (it) { return it.categoryId === ce.id ? Object.assign({}, it, { categoryId: fb }) : it; });
+    state.categories = rest;
+    if (state.addCategoryId === ce.id) state.addCategoryId = fb;
+    var pv = Object.assign({}, state.pv); delete pv[ce.id]; state.pv = pv;
+    state.catEditor = null; persist(); render();
   }
 
   // ----------------------------------------------------------------- view model
@@ -373,9 +457,18 @@
       if (it.month != null) monthCount[it.month] = (monthCount[it.month] || 0) + 1;
     });
 
-    var byCell = {};
+    // scheduled items, each with its inclusive day-of-year coverage. Shaded-category
+    // items tint the day; the rest render as chips.
+    var sched = [];
     vis.forEach(function (it) {
-      if (it.month != null) { var k = it.month + '-' + (it.day || 1); (byCell[k] = byCell[k] || []).push(it); }
+      if (it.month == null) return;
+      var lo = ord(it.month, it.day || 1);
+      var em = (it.endMonth == null ? it.month : it.endMonth);
+      var ed = (it.endDay == null ? (it.day || 1) : it.endDay);
+      var hi = ord(em, ed);
+      if (hi < lo) { var t = lo; lo = hi; hi = t; }
+      var cat = catById(it.categoryId);
+      sched.push({ lo: lo, hi: hi, view: itemView(it), id: it.id, title: it.title, shade: !!(cat && cat.shade), color: catColor(it.categoryId) });
     });
 
     var backlogItems = vis.filter(function (it) { return it.month == null; }).map(itemView);
@@ -391,7 +484,6 @@
       };
     });
 
-    var vr = visibleRanges();
     var rows = [];
     for (var d = 1; d <= 31; d++) {
       var cells = [];
@@ -399,64 +491,39 @@
         var valid = d <= DIM[m];
         var weekend = valid && isWeekend(m, d);
         var isToday = valid && m === TODAY_M && d === TODAY_D;
-        var its = valid ? (byCell[m + '-' + d] || []).map(itemView) : [];
+        var od = valid ? ord(m, d) : 0;
 
-        // period coverage: tint covered cells; label at each month-segment start (start day, or day 1 of a continued month)
-        var coverColor = null, cellLabels = [];
+        // shaded-category items: tint covered cells, label on the start day only
+        // normal items: full chip on the start day, continuation bar otherwise
+        var coverColor = null, shadeLabels = [], cellItems = [];
         if (valid) {
-          var od = ord(m, d);
-          for (var ri = 0; ri < vr.length; ri++) {
-            var r = vr[ri];
-            if (ord(r.startMonth, r.startDay) <= od && od <= ord(r.endMonth, r.endDay)) {
-              var rc = rangeColor(r.type);
-              if (!coverColor) coverColor = rc;
-              if ((m === r.startMonth && d === r.startDay) || d === 1) cellLabels.push({ id: r.id, title: r.title, color: rc });
+          for (var si = 0; si < sched.length; si++) {
+            var s = sched[si];
+            if (s.lo <= od && od <= s.hi) {
+              if (s.shade) {
+                if (!coverColor) coverColor = s.color;
+                if (od === s.lo) shadeLabels.push({ id: s.id, title: s.title, color: s.color });
+              } else {
+                cellItems.push({ v: s.view, start: od === s.lo });
+              }
             }
           }
         }
 
-        var bg = !valid ? '#DBDDE1' : (coverColor ? rangeTint(coverColor) : (weekend ? '#F1F2F4' : '#FFFFFF'));
+        var bg = !valid ? '#DBDDE1' : (coverColor ? shadeTint(coverColor) : (weekend ? '#F1F2F4' : '#FFFFFF'));
         cells.push({
-          valid: valid, items: its, bg: bg, m: m, d: d, rangeLabels: cellLabels,
+          valid: valid, items: cellItems, shadeLabels: shadeLabels, bg: bg, m: m, d: d,
           ring: isToday ? 'inset 0 0 0 2px ' + ACCENT_BORDER : 'none'
         });
       }
       rows.push({ day: d, cells: cells });
     }
 
-    // period list (sidebar) sorted by start date
-    var periodList = state.ranges.slice().sort(function (a, b) {
-      return ord(a.startMonth, a.startDay) - ord(b.startMonth, b.startDay);
-    }).map(function (r) {
-      return {
-        id: r.id, title: r.title, type: r.type, color: rangeColor(r.type),
-        span: formatSpan(r.startMonth, r.startDay, r.endMonth, r.endDay),
-        days: spanDays(r.startMonth, r.startDay, r.endMonth, r.endDay)
-      };
-    });
-
-    // period editor draft view
-    var period = null;
-    if (state.periodEditorId && state.periodDraft) {
-      var pd = state.periodDraft;
-      var psm = pd.startMonth | 0, pem = pd.endMonth | 0;
-      var psd = clampDay(psm, pd.startDay), ped = clampDay(pem, pd.endDay);
-      var lo = ord(psm, psd), hi = ord(pem, ped);
-      period = {
-        title: pd.title, type: pd.type, note: pd.note || '',
-        startMonth: psm, startDay: pd.startDay, endMonth: pem, endDay: pd.endDay,
-        color: rangeColor(pd.type),
-        typeLabel: pd.type === 'vacation' ? 'Vacation' : 'Public holiday',
-        spanText: hi >= lo ? formatSpan(psm, psd, pem, ped) : 'End is before start',
-        days: Math.max(1, hi - lo + 1)
-      };
-    }
-
     var categoryTree = S.categories.map(function (c) {
       var on = S.pv[c.id] !== false;
       var color = catColor(c.id);
       return {
-        id: c.id, name: c.name, count: catCount[c.id] || 0,
+        id: c.id, name: c.name, count: catCount[c.id] || 0, shade: !!c.shade,
         swatchBg: on ? color : '#fff',
         swatchBorder: on ? color : '#C9CDD5',
         mark: on ? '✓' : '',
@@ -464,10 +531,10 @@
       };
     });
 
-    var sched = vis.filter(function (it) { return it.month != null; });
-    var total = sched.length;
+    var schedVis = vis.filter(function (it) { return it.month != null; });
+    var total = schedVis.length;
     var balanceSegments = S.categories.map(function (c) {
-      var n = sched.filter(function (it) { return it.categoryId === c.id; }).length;
+      var n = schedVis.filter(function (it) { return it.categoryId === c.id; }).length;
       return {
         id: c.id, name: c.name, color: catColor(c.id), count: n,
         pct: total ? (n / total * 100).toFixed(2) : 0,
@@ -481,17 +548,38 @@
     var editor = null;
     if (editItem) {
       var ec = catById(editItem.categoryId);
+      var esched = editItem.month != null;
+      var eem = (editItem.endMonth == null ? editItem.month : editItem.endMonth);
+      var eed = (editItem.endDay == null ? editItem.day : editItem.endDay);
       editor = {
         id: editItem.id, title: editItem.title, note: editItem.note || '', categoryId: editItem.categoryId,
         color: catColor(editItem.categoryId), catName: ec ? ec.name : '',
-        scheduled: editItem.month != null,
-        placement: editItem.month != null ? (MONTHS_SHORT[editItem.month] + ' ' + (editItem.day || 1)) : ''
+        scheduled: esched,
+        startMonth: editItem.month, startDay: editItem.day, endMonth: eem, endDay: eed,
+        spanText: esched ? formatSpan(editItem.month, editItem.day, eem, eed) : '',
+        days: esched ? Math.max(1, ord(eem, eed) - ord(editItem.month, editItem.day) + 1) : 0,
+        placement: esched ? formatSpan(editItem.month, editItem.day, eem, eed) : ''
+      };
+    }
+
+    // category editor view
+    var catEd = null;
+    if (state.catEditor) {
+      var ce = state.catEditor;
+      var refCount = ce.id ? S.items.filter(function (it) { return it.categoryId === ce.id; }).length : 0;
+      catEd = {
+        id: ce.id, isNew: !ce.id, name: ce.name, shade: !!ce.shade,
+        colorStr: oklchStr(ce.color),
+        title: (ce.id ? 'Edit category' : 'New category'),
+        deletable: !!ce.id && S.categories.length > 1,
+        refCount: refCount, refLabel: refCount === 1 ? 'item' : 'items',
+        swatches: SWATCHES.map(function (sw, i) { return { idx: i, str: oklchStr(sw), sel: sameColor(sw, ce.color) }; })
       };
     }
 
     return {
       yearLabel: String(YEAR),
-      scheduledCount: sched.length,
+      scheduledCount: schedVis.length,
       backlogCount: backlogItems.length,
       showBalance: S.showBalance,
       monthsHeader: monthsHeader, rows: rows,
@@ -502,16 +590,38 @@
       categoryOptions: categoryOptions,
       addTitle: S.addTitle, addCategoryId: S.addCategoryId,
       editorOpen: !!editor, editor: editor,
-      periodList: periodList, periodCount: periodList.length,
-      periodEditorOpen: !!period, period: period, periodIsNew: S.periodEditorId === '__new__'
+      catEditorOpen: !!catEd, catEd: catEd
     };
   }
 
-  // ----------------------------------------------------------------- render
+  // ----------------------------------------------------------------- render helpers
   function optionsHtml(opts, selected) {
     return opts.map(function (o) {
       return '<option value="' + esc(o.id) + '"' + (o.id === selected ? ' selected' : '') + '>' + esc(o.label) + '</option>';
     }).join('');
+  }
+  function monthOptions(sel) {
+    return MONTHS_SHORT.map(function (n, i) { return '<option value="' + i + '"' + (i === sel ? ' selected' : '') + '>' + n + '</option>'; }).join('');
+  }
+  var DATE_FIELD_STYLE = 'border:1px solid #E4E6EB; background:#FBFBFC; border-radius:10px; padding:9px 10px; font-size:13.5px; color:#1B1E26;';
+
+  function dateRangeFields(prefix, startMonth, startDay, endMonth, endDay) {
+    return '<div style="display:flex; gap:14px; margin-bottom:10px;">'
+      +   '<div style="flex:1; min-width:0;">'
+      +     '<label style="display:block; font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#9AA0AB; margin-bottom:7px;">Start</label>'
+      +     '<div style="display:flex; gap:7px;">'
+      +       '<select data-field="' + prefix + 'StartMonth" style="flex:1; min-width:0; ' + DATE_FIELD_STYLE + '">' + monthOptions(startMonth) + '</select>'
+      +       '<input type="number" data-field="' + prefix + 'StartDay" min="1" max="' + DIM[startMonth] + '" value="' + esc(startDay) + '" style="width:58px; ' + DATE_FIELD_STYLE + '" />'
+      +     '</div>'
+      +   '</div>'
+      +   '<div style="flex:1; min-width:0;">'
+      +     '<label style="display:block; font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#9AA0AB; margin-bottom:7px;">End</label>'
+      +     '<div style="display:flex; gap:7px;">'
+      +       '<select data-field="' + prefix + 'EndMonth" style="flex:1; min-width:0; ' + DATE_FIELD_STYLE + '">' + monthOptions(endMonth) + '</select>'
+      +       '<input type="number" data-field="' + prefix + 'EndDay" min="1" max="' + DIM[endMonth] + '" value="' + esc(endDay) + '" style="width:58px; ' + DATE_FIELD_STYLE + '" />'
+      +     '</div>'
+      +   '</div>'
+      + '</div>';
   }
 
   function render() {
@@ -561,51 +671,23 @@
     }
     html += '</div></div>';
 
-    // Periods (vacations & public holidays)
-    html += '<div style="margin-bottom:22px;">'
-          +   '<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:9px;">'
-          +     '<div style="display:flex; align-items:center; gap:7px;">'
-          +       '<div style="font-size:11px; font-weight:700; letter-spacing:0.07em; text-transform:uppercase; color:#9AA0AB;">Periods</div>'
-          +       '<div style="font-size:11.5px; font-weight:600; color:#9AA0AB; background:#F3F4F6; border-radius:20px; padding:2px 8px;">' + v.periodCount + '</div>'
-          +     '</div>'
-          +     '<button class="addperiod-btn" data-action="add-period" style="border:1px solid #E4E6EB; background:#fff; color:#5A606C; font-size:11.5px; font-weight:600; cursor:pointer; padding:3px 9px; border-radius:8px;">+ Add</button>'
-          +   '</div>';
-    v.periodList.forEach(function (p) {
-      html += '<div class="period-row" data-action="edit-period" data-id="' + esc(p.id) + '" title="' + esc(p.title) + '" style="display:flex; align-items:center; gap:9px; padding:7px 8px; border-radius:9px; cursor:pointer; background:#fff; border:1px solid #EEEFF2; margin:4px 0;">'
-            +   '<span style="flex:0 0 auto; width:10px; height:10px; border-radius:3px; background:' + p.color + ';"></span>'
-            +   '<span style="flex:1; min-width:0; font-size:13px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + esc(p.title) + '</span>'
-            +   '<span style="flex:0 0 auto; font-size:11px; color:#A7ACB6; font-weight:500;">' + esc(p.span) + '</span>'
-            + '</div>';
-    });
-    if (v.periodCount === 0) {
-      html += '<div style="text-align:center; color:#B7BCC5; font-size:12.5px; padding:14px 8px;">No vacations or holidays yet — add one above.</div>';
-    }
-    // layer toggles (double as a legend)
-    html += '<div style="margin-top:10px; display:flex; flex-direction:column; gap:2px;">';
-    [['vacation', 'Vacations', state.showVacations], ['holiday', 'Public holidays', state.showHolidays]].forEach(function (L) {
-      var color = rangeColor(L[0]), on = L[2];
-      html += '<div class="layer-row" data-action="toggle-layer" data-layer="' + L[0] + '" style="display:flex; align-items:center; gap:10px; cursor:pointer; padding:5px 3px; border-radius:8px; user-select:none;">'
-            +   '<span style="flex:0 0 auto; width:15px; height:15px; border-radius:4px; display:flex; align-items:center; justify-content:center; background:' + (on ? color : '#fff') + '; border:1.5px solid ' + (on ? color : '#C9CDD5') + ';">'
-            +     '<span style="color:#fff; font-size:10px; font-weight:800; line-height:1;">' + (on ? '✓' : '') + '</span>'
-            +   '</span>'
-            +   '<span style="flex:1; font-size:13px; font-weight:600; color:' + (on ? '#2A2E38' : '#B7BCC5') + ';">' + L[1] + '</span>'
-            + '</div>';
-    });
-    html += '</div></div>';
-
-    // Filters
+    // Categories (filter + manage). A shaded category tints the whole day on the grid.
     html += '<div style="margin-bottom:22px;">'
           +   '<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:11px;">'
           +     '<div style="font-size:11px; font-weight:700; letter-spacing:0.07em; text-transform:uppercase; color:#9AA0AB;">Categories</div>'
-          +     '<button class="reset-btn" data-action="reset" style="border:none; background:none; color:#A7ACB6; font-size:11.5px; font-weight:600; cursor:pointer; padding:0;">Reset</button>'
+          +     '<div style="display:flex; align-items:center; gap:10px;">'
+          +       '<button class="subadd-btn" data-action="add-cat" style="border:1px solid #E9EAEE; background:#fff; color:#7E8490; font-size:11px; font-weight:600; cursor:pointer; padding:2px 8px; border-radius:7px;">+ Add</button>'
+          +       '<button class="reset-btn" data-action="reset" style="border:none; background:none; color:#A7ACB6; font-size:11.5px; font-weight:600; cursor:pointer; padding:0;">Reset</button>'
+          +     '</div>'
           +   '</div>';
     v.categoryTree.forEach(function (cat) {
-      html += '<div class="cat-row" data-action="toggle" data-id="' + esc(cat.id) + '" style="display:flex; align-items:center; gap:10px; cursor:pointer; padding:6px 3px; border-radius:8px; user-select:none;">'
-            +   '<span style="flex:0 0 auto; width:15px; height:15px; border-radius:4px; display:flex; align-items:center; justify-content:center; background:' + cat.swatchBg + '; border:1.5px solid ' + cat.swatchBorder + ';">'
+      html += '<div class="cat-row" style="display:flex; align-items:center; gap:10px; padding:6px 3px; border-radius:8px; user-select:none;">'
+            +   '<span data-action="toggle" data-id="' + esc(cat.id) + '" style="flex:0 0 auto; width:15px; height:15px; border-radius:4px; display:flex; align-items:center; justify-content:center; cursor:pointer; background:' + cat.swatchBg + '; border:1.5px solid ' + cat.swatchBorder + ';">'
             +     '<span style="color:#fff; font-size:10px; font-weight:800; line-height:1;">' + cat.mark + '</span>'
             +   '</span>'
-            +   '<span style="flex:1; font-size:13.5px; font-weight:600; color:' + cat.textColor + ';">' + esc(cat.name) + '</span>'
-            +   '<span style="font-size:11px; color:#B7BCC5; font-weight:600;">' + cat.count + '</span>'
+            +   '<span data-action="toggle" data-id="' + esc(cat.id) + '" style="flex:1; cursor:pointer; font-size:13.5px; font-weight:600; color:' + cat.textColor + ';">' + esc(cat.name) + (cat.shade ? ' <span title="Shades the whole day" style="font-weight:400; color:#B7BCC5; font-size:11px;">▦</span>' : '') + '</span>'
+            +   '<span class="cat-edit" data-action="edit-cat" data-id="' + esc(cat.id) + '" title="Edit category" style="flex:0 0 auto; font-size:12px; color:#B0B5BE;">✎</span>'
+            +   '<span style="flex:0 0 auto; font-size:11px; color:#B7BCC5; font-weight:600;">' + cat.count + '</span>'
             + '</div>';
     });
     html += '</div>';
@@ -684,11 +766,16 @@
       row.cells.forEach(function (cell) {
         var dropAttrs = cell.valid ? (' class="cell" data-drop="cell" data-m="' + cell.m + '" data-d="' + cell.d + '"') : ' class="cell"';
         html += '<div' + dropAttrs + ' style="flex:1 1 0; min-width:66px; border-right:1px solid #D3D7DE; border-bottom:1px solid #D3D7DE; background:' + cell.bg + '; box-shadow:' + cell.ring + '; padding:2px; display:flex; flex-direction:column; gap:2px;">';
-        cell.rangeLabels.forEach(function (rl) {
-          html += '<div class="range-label" data-action="edit-period" data-id="' + esc(rl.id) + '" title="' + esc(rl.title) + '" style="background:' + rl.color + '; color:#fff; font-size:10px; font-weight:700; line-height:1.25; padding:2px 5px; border-radius:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; cursor:pointer;">' + esc(rl.title) + '</div>';
+        cell.shadeLabels.forEach(function (rl) {
+          html += '<div class="range-label" draggable="true" data-id="' + esc(rl.id) + '" data-action="edit" title="' + esc(rl.title) + '" style="background:' + rl.color + '; color:#fff; font-size:10px; font-weight:700; line-height:1.25; padding:2px 5px; border-radius:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; cursor:grab;">' + esc(rl.title) + '</div>';
         });
-        cell.items.forEach(function (it) {
-          html += '<div class="chip" draggable="true" data-id="' + esc(it.id) + '" data-action="edit" title="' + esc(it.title) + '" style="background:' + it.chipBg + '; color:' + it.chipText + '; border-left:2.5px solid ' + it.color + '; font-size:10.5px; font-weight:600; line-height:1.3; padding:2px 4px 2px 5px; border-radius:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; cursor:grab;">' + esc(it.title) + '</div>';
+        cell.items.forEach(function (ci) {
+          var it = ci.v;
+          if (ci.start) {
+            html += '<div class="chip" draggable="true" data-id="' + esc(it.id) + '" data-action="edit" title="' + esc(it.title) + '" style="background:' + it.chipBg + '; color:' + it.chipText + '; border-left:2.5px solid ' + it.color + '; font-size:10.5px; font-weight:600; line-height:1.3; padding:2px 4px 2px 5px; border-radius:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; cursor:grab;">' + esc(it.title) + '</div>';
+          } else {
+            html += '<div class="chip-cont" data-id="' + esc(it.id) + '" data-action="edit" title="' + esc(it.title) + '" style="height:9px; background:' + it.chipBg + '; border-left:2.5px solid ' + it.color + '; border-radius:3px; cursor:pointer;"></div>';
+          }
         });
         html += '</div>';
       });
@@ -697,7 +784,7 @@
 
     html += '</div></div></main>';
 
-    // ============ EDITOR MODAL ============
+    // ============ ITEM EDITOR MODAL ============
     if (v.editorOpen) {
       var ed = v.editor;
       html += '<div data-action="overlay-close" style="position:fixed; inset:0; background:rgba(20,24,33,.32); display:flex; align-items:center; justify-content:center; z-index:50; backdrop-filter:blur(1.5px);">'
@@ -712,7 +799,17 @@
             +       '<input type="text" data-field="editTitle" value="' + esc(ed.title) + '" style="width:100%; border:1px solid #E4E6EB; background:#FBFBFC; border-radius:11px; padding:11px 13px; font-size:15px; font-weight:600; color:#1B1E26; margin-bottom:16px;" />'
             +       '<label style="display:block; font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#9AA0AB; margin-bottom:7px;">Category</label>'
             +       '<select data-field="editCategory" style="width:100%; border:1px solid #E4E6EB; background:#FBFBFC; border-radius:11px; padding:11px 13px; font-size:14px; color:#1B1E26; margin-bottom:16px;">' + optionsHtml(v.categoryOptions, ed.categoryId) + '</select>'
-            +       '<label style="display:block; font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#9AA0AB; margin-bottom:7px;">Note</label>'
+            +       '<label style="display:block; font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#9AA0AB; margin-bottom:7px;">When</label>';
+      if (ed.scheduled) {
+        html += dateRangeFields('edit', ed.startMonth, ed.startDay, ed.endMonth, ed.endDay)
+              + '<div style="font-size:12.5px; color:#9AA0AB; font-weight:500; margin-bottom:16px;">' + esc(ed.spanText) + '  ·  ' + ed.days + (ed.days === 1 ? ' day' : ' days') + ' — set a later end for a multi-day event</div>';
+      } else {
+        html += '<div style="display:flex; align-items:center; gap:10px; margin-bottom:16px; padding:10px 12px; background:#FAFAFB; border:1px solid #EEEFF2; border-radius:11px;">'
+              +   '<span style="flex:1; font-size:12.5px; color:#9AA0AB; font-weight:500;">In backlog — not on the calendar yet</span>'
+              +   '<button class="tobacklog-btn" data-action="schedule-item" style="border:1px solid #E4E6EB; background:#fff; color:#5A606C; font-size:12.5px; font-weight:600; cursor:pointer; padding:6px 11px; border-radius:9px;">Add to calendar</button>'
+              + '</div>';
+      }
+      html += '<label style="display:block; font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#9AA0AB; margin-bottom:7px;">Note</label>'
             +       '<textarea data-field="editNote" placeholder="Add a short note…" style="width:100%; min-height:74px; resize:vertical; border:1px solid #E4E6EB; background:#FBFBFC; border-radius:11px; padding:11px 13px; font-size:13.5px; color:#4B5160; line-height:1.5; box-sizing:border-box; display:block;">' + esc(ed.note) + '</textarea>'
             +     '</div>'
             +     '<div style="display:flex; align-items:center; gap:9px; padding:14px 22px; border-top:1px solid #F0F1F4; background:#FAFAFB;">'
@@ -725,53 +822,35 @@
             + '</div>';
     }
 
-    // ============ PERIOD EDITOR MODAL ============
-    if (v.periodEditorOpen) {
-      var p = v.period;
-      var monthOpts = function (sel) {
-        return MONTHS_SHORT.map(function (n, i) { return '<option value="' + i + '"' + (i === sel ? ' selected' : '') + '>' + n + '</option>'; }).join('');
-      };
-      var dateFieldStyle = 'border:1px solid #E4E6EB; background:#FBFBFC; border-radius:10px; padding:9px 10px; font-size:13.5px; color:#1B1E26;';
-      html += '<div data-action="period-overlay-close" style="position:fixed; inset:0; background:rgba(20,24,33,.32); display:flex; align-items:center; justify-content:center; z-index:50; backdrop-filter:blur(1.5px);">'
-            +   '<div data-modal-card style="width:460px; max-width:92vw; background:#fff; border-radius:18px; box-shadow:0 24px 64px rgba(16,24,40,.28); overflow:hidden;">'
+    // ============ CATEGORY EDITOR MODAL ============
+    if (v.catEditorOpen) {
+      var ce = v.catEd;
+      html += '<div data-action="cat-overlay-close" style="position:fixed; inset:0; background:rgba(20,24,33,.32); display:flex; align-items:center; justify-content:center; z-index:55; backdrop-filter:blur(1.5px);">'
+            +   '<div data-modal-card style="width:400px; max-width:92vw; background:#fff; border-radius:18px; box-shadow:0 24px 64px rgba(16,24,40,.28); overflow:hidden;">'
             +     '<div style="padding:20px 22px 16px; display:flex; align-items:center; gap:11px; border-bottom:1px solid #F0F1F4;">'
-            +       '<span style="width:12px; height:12px; border-radius:4px; background:' + p.color + ';"></span>'
-            +       '<div style="flex:1; font-size:12px; font-weight:600; color:#9AA0AB;">' + (v.periodIsNew ? 'New period' : 'Edit period') + '</div>'
-            +       '<div style="font-size:12px; font-weight:600; color:#9AA0AB; background:#F3F4F6; border-radius:20px; padding:3px 10px;">' + p.days + (p.days === 1 ? ' day' : ' days') + '</div>'
+            +       '<span style="width:12px; height:12px; border-radius:4px; background:' + ce.colorStr + ';"></span>'
+            +       '<div style="flex:1; font-size:12px; font-weight:600; color:#9AA0AB;">' + esc(ce.title) + '</div>'
             +     '</div>'
             +     '<div style="padding:18px 22px 22px;">'
-            +       '<label style="display:block; font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#9AA0AB; margin-bottom:7px;">Title</label>'
-            +       '<input type="text" data-field="pTitle" value="' + esc(p.title) + '" placeholder="e.g. Summer vacation, Easter Monday" style="width:100%; border:1px solid #E4E6EB; background:#FBFBFC; border-radius:11px; padding:11px 13px; font-size:15px; font-weight:600; color:#1B1E26; margin-bottom:16px;" />'
-            +       '<label style="display:block; font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#9AA0AB; margin-bottom:7px;">Type</label>'
-            +       '<select data-field="pType" style="width:100%; border:1px solid #E4E6EB; background:#FBFBFC; border-radius:11px; padding:11px 13px; font-size:14px; color:#1B1E26; margin-bottom:16px;">'
-            +         '<option value="vacation"' + (p.type === 'vacation' ? ' selected' : '') + '>Vacation</option>'
-            +         '<option value="holiday"' + (p.type === 'holiday' ? ' selected' : '') + '>Public holiday</option>'
-            +       '</select>'
-            +       '<div style="display:flex; gap:14px; margin-bottom:14px;">'
-            +         '<div style="flex:1; min-width:0;">'
-            +           '<label style="display:block; font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#9AA0AB; margin-bottom:7px;">Start</label>'
-            +           '<div style="display:flex; gap:7px;">'
-            +             '<select data-field="pStartMonth" style="flex:1; min-width:0; ' + dateFieldStyle + '">' + monthOpts(p.startMonth) + '</select>'
-            +             '<input type="number" data-field="pStartDay" min="1" max="' + DIM[p.startMonth] + '" value="' + esc(p.startDay) + '" style="width:58px; ' + dateFieldStyle + '" />'
-            +           '</div>'
-            +         '</div>'
-            +         '<div style="flex:1; min-width:0;">'
-            +           '<label style="display:block; font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#9AA0AB; margin-bottom:7px;">End</label>'
-            +           '<div style="display:flex; gap:7px;">'
-            +             '<select data-field="pEndMonth" style="flex:1; min-width:0; ' + dateFieldStyle + '">' + monthOpts(p.endMonth) + '</select>'
-            +             '<input type="number" data-field="pEndDay" min="1" max="' + DIM[p.endMonth] + '" value="' + esc(p.endDay) + '" style="width:58px; ' + dateFieldStyle + '" />'
-            +           '</div>'
-            +         '</div>'
-            +       '</div>'
-            +       '<div style="font-size:12.5px; color:#9AA0AB; font-weight:500; margin-bottom:16px;">' + esc(p.spanText) + '  ·  for a single-day holiday, set start and end to the same date</div>'
-            +       '<label style="display:block; font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#9AA0AB; margin-bottom:7px;">Note</label>'
-            +       '<textarea data-field="pNote" placeholder="Add a short note…" style="width:100%; min-height:64px; resize:vertical; border:1px solid #E4E6EB; background:#FBFBFC; border-radius:11px; padding:11px 13px; font-size:13.5px; color:#4B5160; line-height:1.5; box-sizing:border-box; display:block;">' + esc(p.note) + '</textarea>'
-            +     '</div>'
+            +       '<label style="display:block; font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#9AA0AB; margin-bottom:7px;">Name</label>'
+            +       '<input type="text" data-field="catName" value="' + esc(ce.name) + '" placeholder="e.g. Fitness, Public holiday" style="width:100%; border:1px solid #E4E6EB; background:#FBFBFC; border-radius:11px; padding:11px 13px; font-size:15px; font-weight:600; color:#1B1E26; margin-bottom:16px;" />'
+            +       '<label style="display:block; font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#9AA0AB; margin-bottom:9px;">Color</label>'
+            +       '<div style="display:flex; flex-wrap:wrap; gap:9px;">';
+      ce.swatches.forEach(function (sw) {
+        html += '<span class="swatch" data-action="pick-swatch" data-idx="' + sw.idx + '" style="width:26px; height:26px; border-radius:7px; cursor:pointer; background:' + sw.str + '; transition:transform .1s; box-shadow:' + (sw.sel ? '0 0 0 2px #fff, 0 0 0 4px ' + sw.str : 'inset 0 0 0 1px rgba(0,0,0,.06)') + ';"></span>';
+      });
+      html += '</div>'
+            +       '<label class="topbar-ctl" style="display:flex; align-items:center; gap:9px; margin-top:18px; font-size:13.5px; font-weight:600; color:#2A2E38; user-select:none;"><input type="checkbox" data-field="catShade"' + (ce.shade ? ' checked' : '') + ' /> Shade the whole day</label>'
+            +       '<div style="font-size:12px; color:#B0B5BE; font-weight:500; margin-top:5px;">For holidays, vacations &amp; time off — events tint the day instead of showing a chip.</div>';
+      if (ce.id && ce.refCount > 0) {
+        html += '<div style="font-size:12px; color:#B0B5BE; font-weight:500; margin-top:14px;">Deleting moves its ' + ce.refCount + ' ' + ce.refLabel + ' to another category.</div>';
+      }
+      html += '</div>'
             +     '<div style="display:flex; align-items:center; gap:9px; padding:14px 22px; border-top:1px solid #F0F1F4; background:#FAFAFB;">'
-            +       (v.periodIsNew ? '' : '<button class="delete-btn" data-action="delete-period" style="border:none; background:none; color:#C0392B; font-size:13px; font-weight:600; cursor:pointer; padding:8px 4px;">Delete</button>')
+            +       (ce.deletable ? '<button class="delete-btn" data-action="delete-cat" style="border:none; background:none; color:#C0392B; font-size:13px; font-weight:600; cursor:pointer; padding:8px 4px;">Delete</button>' : '')
             +       '<span style="flex:1;"></span>'
-            +       '<button class="tobacklog-btn" data-action="period-close" style="border:1px solid #E4E6EB; background:#fff; color:#5A606C; font-size:13px; font-weight:600; cursor:pointer; padding:8px 14px; border-radius:9px;">Cancel</button>'
-            +       '<button class="done-btn" data-action="save-period" style="border:none; background:#1B1E26; color:#fff; font-size:13px; font-weight:600; cursor:pointer; padding:9px 20px; border-radius:9px;">' + (v.periodIsNew ? 'Add period' : 'Save') + '</button>'
+            +       '<button class="tobacklog-btn" data-action="cat-close" style="border:1px solid #E4E6EB; background:#fff; color:#5A606C; font-size:13px; font-weight:600; cursor:pointer; padding:8px 14px; border-radius:9px;">Cancel</button>'
+            +       '<button class="done-btn" data-action="save-cat" style="border:none; background:#1B1E26; color:#fff; font-size:13px; font-weight:600; cursor:pointer; padding:9px 20px; border-radius:9px;">' + (ce.isNew ? 'Add' : 'Save') + '</button>'
             +     '</div>'
             +   '</div>'
             + '</div>';
@@ -824,24 +903,25 @@
       if (!e.target.closest('[data-modal-card]')) { state.editorId = null; render(); }
       return;
     }
-    if (action === 'period-overlay-close') {
-      if (!e.target.closest('[data-modal-card]')) closePeriod();
+    if (action === 'cat-overlay-close') {
+      if (!e.target.closest('[data-modal-card]')) closeCat();
       return;
     }
     switch (action) {
       case 'add': addItem(); break;
       case 'reset': resetFilters(); break;
       case 'toggle': toggleCategory(el.getAttribute('data-id')); break;
-      case 'edit': state.editorId = el.getAttribute('data-id'); state.periodEditorId = null; render(); break;
+      case 'edit': state.editorId = el.getAttribute('data-id'); state.catEditor = null; render(); break;
       case 'delete': deleteItem(state.editorId); break;
-      case 'unschedule': updateItem(state.editorId, { month: null, day: null }); render(); break;
+      case 'unschedule': updateItem(state.editorId, { month: null, day: null, endMonth: null, endDay: null }); render(); break;
+      case 'schedule-item': scheduleItem(state.editorId); break;
       case 'close': state.editorId = null; render(); break;
-      case 'add-period': openPeriodNew(); break;
-      case 'edit-period': openPeriodEdit(el.getAttribute('data-id')); break;
-      case 'save-period': savePeriod(); break;
-      case 'delete-period': deletePeriod(); break;
-      case 'period-close': closePeriod(); break;
-      case 'toggle-layer': toggleLayer(el.getAttribute('data-layer')); break;
+      case 'add-cat': openCatNew(); break;
+      case 'edit-cat': openCatEdit(el.getAttribute('data-id')); break;
+      case 'save-cat': saveCat(); break;
+      case 'delete-cat': deleteCat(); break;
+      case 'cat-close': closeCat(); break;
+      case 'pick-swatch': if (state.catEditor) { state.catEditor.color = SWATCHES[parseInt(el.getAttribute('data-idx'), 10)]; render(); } break;
     }
   });
 
@@ -852,12 +932,9 @@
     if (f === 'addTitle') { state.addTitle = e.target.value; }
     else if (f === 'editTitle') { if (state.editorId) updateItem(state.editorId, { title: e.target.value }); }
     else if (f === 'editNote') { if (state.editorId) updateItem(state.editorId, { note: e.target.value }); }
-    else if (state.periodDraft) {
-      if (f === 'pTitle') state.periodDraft.title = e.target.value;
-      else if (f === 'pNote') state.periodDraft.note = e.target.value;
-      else if (f === 'pStartDay') state.periodDraft.startDay = e.target.value;
-      else if (f === 'pEndDay') state.periodDraft.endDay = e.target.value;
-    }
+    else if (f === 'editStartDay') { if (state.editorId) updateItemDates(state.editorId, 'startDay', e.target.value, false); }
+    else if (f === 'editEndDay') { if (state.editorId) updateItemDates(state.editorId, 'endDay', e.target.value, false); }
+    else if (f === 'catName') { if (state.catEditor) state.catEditor.name = e.target.value; }
   });
 
   // selects / checkboxes: safe to re-render
@@ -866,23 +943,21 @@
     if (!f) return;
     if (f === 'addCategory') { state.addCategoryId = e.target.value; persist(); }
     else if (f === 'editCategory') { if (state.editorId) { updateItem(state.editorId, { categoryId: e.target.value }); render(); } }
+    else if (f === 'editStartMonth') { if (state.editorId) updateItemDates(state.editorId, 'startMonth', e.target.value, true); }
+    else if (f === 'editEndMonth') { if (state.editorId) updateItemDates(state.editorId, 'endMonth', e.target.value, true); }
+    else if (f === 'editStartDay') { if (state.editorId) updateItemDates(state.editorId, 'startDay', e.target.value, true); }
+    else if (f === 'editEndDay') { if (state.editorId) updateItemDates(state.editorId, 'endDay', e.target.value, true); }
+    else if (f === 'catShade') { if (state.catEditor) state.catEditor.shade = e.target.checked; }
     else if (f === 'palette') { state.palette = e.target.value; persist(); render(); }
     else if (f === 'showBalance') { state.showBalance = e.target.checked; persist(); render(); }
     else if (f === 'compact') { state.compact = e.target.checked; persist(); render(); }
-    else if (state.periodDraft) {
-      if (f === 'pType') { state.periodDraft.type = e.target.value; render(); }
-      else if (f === 'pStartMonth') { state.periodDraft.startMonth = parseInt(e.target.value, 10); render(); }
-      else if (f === 'pEndMonth') { state.periodDraft.endMonth = parseInt(e.target.value, 10); render(); }
-      else if (f === 'pStartDay') { state.periodDraft.startDay = e.target.value; render(); }
-      else if (f === 'pEndDay') { state.periodDraft.endDay = e.target.value; render(); }
-    }
   });
 
   root.addEventListener('keydown', function (e) {
     var f = e.target.getAttribute && e.target.getAttribute('data-field');
     if (f === 'addTitle' && e.key === 'Enter') addItem();
+    if (e.key === 'Escape' && state.catEditor) { closeCat(); return; }
     if (e.key === 'Escape' && state.editorId) { state.editorId = null; render(); }
-    if (e.key === 'Escape' && state.periodEditorId) closePeriod();
   });
 
   render();
