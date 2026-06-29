@@ -39,6 +39,8 @@
   .cat-row:hover .cat-edit { opacity:1; }
   .cat-edit:hover { color:#5A606C !important; }
   .swatch:hover { transform:scale(1.1); }
+  .collapse-btn:hover { background:#EEF0F3 !important; color:#2A2E38 !important; border-color:#C7CAD2 !important; }
+  .today-btn:hover { background:#EEF2FB !important; border-color:#B9C7EC !important; }
 
   /* drag-over highlight (applied directly to drop targets during a drag) */
   .cell.hot { background: rgba(74,110,210,.14) !important; }
@@ -61,10 +63,15 @@
   var MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   var DIM  = [31,28,31,30,31,30,31,31,30,31,30,31]; // 2026 (not a leap year)
   var YEAR = 2026;
-  var TODAY_M = 5;  // June
-  var TODAY_D = 27;
+  // "Today" lights up the live date when the calendar's year is the current one.
+  var TODAY_M = 5, TODAY_D = 27; // fallback (June 27)
+  try {
+    var _now = new Date();
+    if (_now.getFullYear() === YEAR) { TODAY_M = _now.getMonth(); TODAY_D = _now.getDate(); }
+  } catch (e) {}
   var STORE = 'yearcanvas.local.v2';
   var ACCENT_BORDER = 'oklch(0.62 0.12 256)';
+  var TODAY_ACCENT = 'oklch(0.54 0.18 262)'; // bolder blue for the current-day markers
 
   // ----------------------------------------------------------- Supabase sync
   // The anon key is meant to be public (it only grants what RLS allows).
@@ -215,6 +222,7 @@
       draggingId: null, editorId: null,
       addTitle: '', addCategoryId: 'c_work',
       palette: 'default', compact: false, showBalance: true,
+      sidebarCollapsed: false,
       catEditor: null,
     };
     try {
@@ -232,6 +240,7 @@
         if (s.palette && PALETTES[s.palette]) runtime.palette = s.palette;
         if (typeof s.compact === 'boolean') runtime.compact = s.compact;
         if (typeof s.showBalance === 'boolean') runtime.showBalance = s.showBalance;
+        if (typeof s.sidebarCollapsed === 'boolean') runtime.sidebarCollapsed = s.sidebarCollapsed;
       }
     } catch (e) {}
     if (!base.categories.some(function (c) { return c.id === runtime.addCategoryId; })) {
@@ -246,7 +255,8 @@
     return {
       categories: state.categories,
       items: state.items, pv: state.pv, addCategoryId: state.addCategoryId,
-      palette: state.palette, compact: state.compact, showBalance: state.showBalance
+      palette: state.palette, compact: state.compact, showBalance: state.showBalance,
+      sidebarCollapsed: state.sidebarCollapsed
     };
   }
 
@@ -280,6 +290,7 @@
     if (s.palette && PALETTES[s.palette]) state.palette = s.palette;
     if (typeof s.compact === 'boolean') state.compact = s.compact;
     if (typeof s.showBalance === 'boolean') state.showBalance = s.showBalance;
+    if (typeof s.sidebarCollapsed === 'boolean') state.sidebarCollapsed = s.sidebarCollapsed;
     if (!state.categories.some(function (c) { return c.id === state.addCategoryId; })) {
       state.addCategoryId = state.categories[0] ? state.categories[0].id : 'c_work';
     }
@@ -305,7 +316,7 @@
     if (c && c.color) return oklchStr(c.color);
     var b = palette()[id];
     if (b) return oklchStr(b);
-    return '#9AA0AB';
+    return '#6E737E';
   }
   function catColorObj(id) {
     var c = catById(id);
@@ -351,6 +362,9 @@
   function resetFilters() {
     var pv = {}; state.categories.forEach(function (c) { pv[c.id] = true; });
     state.pv = pv; persist(); render();
+  }
+  function toggleSidebar() {
+    state.sidebarCollapsed = !state.sidebarCollapsed; persist(); render();
   }
   function addItem() {
     var title = (state.addTitle || '').trim();
@@ -481,9 +495,9 @@
       var isToday = idx === TODAY_M;
       var c = monthCount[idx] || 0;
       return {
-        name: name, idx: idx,
-        bg: isToday ? '#EEF2FB' : '#FAFAFB',
-        color: isToday ? '#2A4FB0' : '#5A606C',
+        name: name, idx: idx, today: isToday,
+        bg: isToday ? '#E4ECFC' : '#F4F5F8',
+        color: isToday ? '#23459E' : '#4E5460',
         countLabel: c > 0 ? (c + (c === 1 ? ' item' : ' items')) : ''
       };
     });
@@ -516,13 +530,14 @@
           }
         }
 
-        var base = !valid ? '#DBDDE1' : (coverColor ? shadeTint(coverColor) : (weekend ? '#F1F2F4' : '#FFFFFF'));
+        var base = !valid ? '#DBDDE1' : (coverColor ? shadeTint(coverColor) : (weekend ? '#EDEFF2' : '#FFFFFF'));
+        if (isToday && !coverColor) base = '#E8F0FE'; // tint today when it isn't already shaded
         var bg = bandColor
           ? 'linear-gradient(to right, ' + shadeBand(bandColor) + ' 0%, ' + shadeBand(bandColor) + ' 25%, transparent 25%, transparent 100%), ' + base
           : base;
         cells.push({
-          valid: valid, items: cellItems, shadeLabels: shadeLabels, bg: bg, m: m, d: d,
-          ring: isToday ? 'inset 0 0 0 2px ' + ACCENT_BORDER : 'none'
+          valid: valid, items: cellItems, shadeLabels: shadeLabels, bg: bg, m: m, d: d, today: isToday,
+          ring: isToday ? 'inset 0 0 0 2px ' + TODAY_ACCENT : 'none'
         });
       }
       rows.push({ day: d, cells: cells });
@@ -588,6 +603,7 @@
 
     return {
       yearLabel: String(YEAR),
+      todayLabel: MONTHS_SHORT[TODAY_M] + ' ' + TODAY_D,
       scheduledCount: schedVis.length,
       backlogCount: backlogItems.length,
       showBalance: S.showBalance,
@@ -617,14 +633,14 @@
   function dateRangeFields(prefix, startMonth, startDay, endMonth, endDay) {
     return '<div style="display:flex; gap:14px; margin-bottom:10px;">'
       +   '<div style="flex:1; min-width:0;">'
-      +     '<label style="display:block; font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#9AA0AB; margin-bottom:7px;">Start</label>'
+      +     '<label style="display:block; font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#6E737E; margin-bottom:7px;">Start</label>'
       +     '<div style="display:flex; gap:7px;">'
       +       '<select data-field="' + prefix + 'StartMonth" style="flex:1; min-width:0; ' + DATE_FIELD_STYLE + '">' + monthOptions(startMonth) + '</select>'
       +       '<input type="number" data-field="' + prefix + 'StartDay" min="1" max="' + DIM[startMonth] + '" value="' + esc(startDay) + '" style="width:58px; ' + DATE_FIELD_STYLE + '" />'
       +     '</div>'
       +   '</div>'
       +   '<div style="flex:1; min-width:0;">'
-      +     '<label style="display:block; font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#9AA0AB; margin-bottom:7px;">End</label>'
+      +     '<label style="display:block; font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#6E737E; margin-bottom:7px;">End</label>'
       +     '<div style="display:flex; gap:7px;">'
       +       '<select data-field="' + prefix + 'EndMonth" style="flex:1; min-width:0; ' + DATE_FIELD_STYLE + '">' + monthOptions(endMonth) + '</select>'
       +       '<input type="number" data-field="' + prefix + 'EndDay" min="1" max="' + DIM[endMonth] + '" value="' + esc(endDay) + '" style="width:58px; ' + DATE_FIELD_STYLE + '" />'
@@ -640,20 +656,24 @@
     html += '<div class="' + (state.compact ? 'compact ' : '') + 'root" style="display:flex; height:100vh; width:100%; overflow:hidden;">';
 
     // ============ SIDEBAR ============
-    html += '<aside style="width:312px; flex:0 0 312px; height:100%; background:#FFFFFF; border-right:1px solid #EAEBEF; display:flex; flex-direction:column;">';
-    html += '<div style="padding:20px 20px 15px; border-bottom:1px solid #F0F1F4;">'
-          +   '<div style="display:flex; align-items:baseline; gap:8px;">'
-          +     '<div style="font-size:17px; font-weight:700; letter-spacing:-0.01em;">Year Canvas</div>'
-          +     '<div style="font-size:12.5px; color:#9AA0AB; font-weight:500;">' + esc(v.yearLabel) + '</div>'
+    if (!state.sidebarCollapsed) {
+    html += '<aside style="width:312px; flex:0 0 312px; height:100%; background:#FFFFFF; border-right:1px solid #DADCE2; display:flex; flex-direction:column;">';
+    html += '<div style="padding:20px 20px 15px; border-bottom:1px solid #E7E8ED;">'
+          +   '<div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">'
+          +     '<div style="display:flex; align-items:baseline; gap:8px; min-width:0;">'
+          +       '<div style="font-size:17px; font-weight:700; letter-spacing:-0.01em;">Year Canvas</div>'
+          +       '<div style="font-size:12.5px; color:#6E737E; font-weight:500;">' + esc(v.yearLabel) + '</div>'
+          +     '</div>'
+          +     '<button class="collapse-btn" data-action="toggle-sidebar" title="Collapse sidebar" aria-label="Collapse sidebar" style="flex:0 0 auto; width:28px; height:28px; border:1px solid #DCDEE3; background:#fff; color:#5A606C; border-radius:8px; cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:15px; line-height:1;">«</button>'
           +   '</div>'
-          +   '<div style="font-size:12.5px; color:#9AA0AB; margin-top:2px;">Your whole year at a glance</div>'
+          +   '<div style="font-size:12.5px; color:#6E737E; margin-top:2px;">Your whole year at a glance</div>'
           + '</div>';
 
     html += '<div style="flex:1; min-height:0; overflow-y:auto; padding:16px 16px 24px;">';
 
     // Quick add
     html += '<div style="margin-bottom:20px;">'
-          +   '<div style="font-size:11px; font-weight:700; letter-spacing:0.07em; text-transform:uppercase; color:#9AA0AB; margin-bottom:9px;">Add to backlog</div>'
+          +   '<div style="font-size:11px; font-weight:700; letter-spacing:0.07em; text-transform:uppercase; color:#6E737E; margin-bottom:9px;">Add to backlog</div>'
           +   '<input type="text" data-field="addTitle" value="' + esc(v.addTitle) + '" placeholder="New item…" style="width:100%; border:1px solid #E4E6EB; background:#FBFBFC; border-radius:10px; padding:9px 11px; font-size:13.5px; color:#1B1E26; margin-bottom:7px;" />'
           +   '<div style="display:flex; gap:7px;">'
           +     '<select data-field="addCategory" style="flex:1; min-width:0; border:1px solid #E4E6EB; background:#FBFBFC; border-radius:10px; padding:8px 9px; font-size:12.5px; color:#4B5160;">' + optionsHtml(v.categoryOptions, v.addCategoryId) + '</select>'
@@ -664,8 +684,8 @@
     // Backlog
     html += '<div style="margin-bottom:22px;">'
           +   '<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:9px;">'
-          +     '<div style="font-size:11px; font-weight:700; letter-spacing:0.07em; text-transform:uppercase; color:#9AA0AB;">Backlog</div>'
-          +     '<div style="font-size:11.5px; font-weight:600; color:#9AA0AB; background:#F3F4F6; border-radius:20px; padding:2px 8px;">' + v.backlogCount + '</div>'
+          +     '<div style="font-size:11px; font-weight:700; letter-spacing:0.07em; text-transform:uppercase; color:#6E737E;">Backlog</div>'
+          +     '<div style="font-size:11.5px; font-weight:600; color:#6E737E; background:#F3F4F6; border-radius:20px; padding:2px 8px;">' + v.backlogCount + '</div>'
           +   '</div>'
           +   '<div class="backlog-drop" data-drop="backlog" style="border-radius:12px; padding:6px; min-height:64px; transition:background .12s,box-shadow .12s; background:#FAFAFB; box-shadow:inset 0 0 0 1px #F0F1F4;">';
     v.backlogItems.forEach(function (it) {
@@ -683,7 +703,7 @@
     // Categories (filter + manage). A shaded category tints the whole day on the grid.
     html += '<div style="margin-bottom:22px;">'
           +   '<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:11px;">'
-          +     '<div style="font-size:11px; font-weight:700; letter-spacing:0.07em; text-transform:uppercase; color:#9AA0AB;">Categories</div>'
+          +     '<div style="font-size:11px; font-weight:700; letter-spacing:0.07em; text-transform:uppercase; color:#6E737E;">Categories</div>'
           +     '<div style="display:flex; align-items:center; gap:10px;">'
           +       '<button class="subadd-btn" data-action="add-cat" style="border:1px solid #E9EAEE; background:#fff; color:#7E8490; font-size:11px; font-weight:600; cursor:pointer; padding:2px 8px; border-radius:7px;">+ Add</button>'
           +       '<button class="reset-btn" data-action="reset" style="border:none; background:none; color:#A7ACB6; font-size:11.5px; font-weight:600; cursor:pointer; padding:0;">Reset</button>'
@@ -705,7 +725,7 @@
     if (v.showBalance) {
       html += '<div>'
             +   '<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">'
-            +     '<div style="font-size:11px; font-weight:700; letter-spacing:0.07em; text-transform:uppercase; color:#9AA0AB;">Balance</div>'
+            +     '<div style="font-size:11px; font-weight:700; letter-spacing:0.07em; text-transform:uppercase; color:#6E737E;">Balance</div>'
             +     '<div style="font-size:11px; color:#B7BCC5; font-weight:500;">' + esc(v.balanceCaption) + '</div>'
             +   '</div>'
             +   '<div style="display:flex; height:10px; border-radius:20px; overflow:hidden; background:#F0F1F4;">';
@@ -717,7 +737,7 @@
         html += '<div style="display:flex; align-items:center; gap:8px;">'
               +   '<span style="width:8px; height:8px; border-radius:50%; background:' + seg.color + ';"></span>'
               +   '<span style="flex:1; font-size:12.5px; color:#5A606C; font-weight:500;">' + esc(seg.name) + '</span>'
-              +   '<span style="font-size:12px; color:#9AA0AB; font-weight:600;">' + esc(seg.label) + '</span>'
+              +   '<span style="font-size:12px; color:#6E737E; font-weight:600;">' + esc(seg.label) + '</span>'
               + '</div>';
       });
       html += '</div>';
@@ -728,19 +748,24 @@
     }
 
     html += '</div></aside>';
+    } // end sidebar
 
     // ============ MAIN ============
     html += '<main style="flex:1; min-width:0; height:100%; display:flex; flex-direction:column;">';
 
     // Top bar
-    html += '<div style="flex:0 0 auto; height:58px; display:flex; align-items:center; justify-content:space-between; padding:0 24px; border-bottom:1px solid #EAEBEF; background:#FAFAFB;">'
-          +   '<div style="display:flex; align-items:baseline; gap:11px;">'
+    html += '<div style="flex:0 0 auto; height:58px; display:flex; align-items:center; justify-content:space-between; padding:0 24px; border-bottom:1px solid #DADCE2; background:#F4F5F8;">'
+          +   '<div style="display:flex; align-items:center; gap:11px; min-width:0;">'
+          +     (state.sidebarCollapsed
+                  ? '<button class="collapse-btn" data-action="toggle-sidebar" title="Show sidebar" aria-label="Show sidebar" style="flex:0 0 auto; width:30px; height:30px; border:1px solid #DCDEE3; background:#fff; color:#4E5460; border-radius:8px; cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:14px; line-height:1;">☰</button>'
+                  : '')
           +     '<div style="font-size:17px; font-weight:700; letter-spacing:-0.01em;">' + esc(v.yearLabel) + '</div>'
-          +     '<div style="font-size:13px; color:#9AA0AB;">Year planner</div>'
+          +     '<div style="font-size:13px; color:#6E737E;">Year planner</div>'
           +   '</div>'
           +   '<div style="display:flex; align-items:center; gap:16px;">'
-          +     '<div style="font-size:12.5px; color:#9AA0AB;">Drag from backlog onto any day · drag back to unschedule</div>'
-          +     '<div style="font-size:12.5px; color:#6B7280; font-weight:600;">' + v.scheduledCount + ' scheduled</div>'
+          +     '<div style="font-size:12.5px; color:#7C818C;">Drag from backlog onto any day · drag back to unschedule</div>'
+          +     '<div style="font-size:12.5px; color:#5A606C; font-weight:600;">' + v.scheduledCount + ' scheduled</div>'
+          +     '<button class="today-btn" data-action="scroll-today" title="Jump to today" style="display:flex; align-items:center; gap:7px; border:1px solid #C6D2F0; background:#EEF2FB; color:#23459E; font-size:12.5px; font-weight:700; cursor:pointer; padding:5px 12px; border-radius:20px;"><span style="width:7px; height:7px; border-radius:50%; background:' + TODAY_ACCENT + ';"></span>' + esc(v.todayLabel) + '</button>'
           +   '</div>'
           + '</div>';
 
@@ -752,20 +777,22 @@
     html += '<div style="flex:0 0 auto; display:flex; position:sticky; top:0; z-index:5;">';
     html += '<div style="flex:0 0 42px; position:sticky; left:0; z-index:6; background:#FAFAFB; border-right:1px solid #E4E6EB; border-bottom:1.5px solid #DCDEE3;"></div>';
     v.monthsHeader.forEach(function (mh) {
-      html += '<div style="flex:1 1 0; min-width:66px; padding:9px 6px; text-align:center; background:' + mh.bg + '; border-right:1px solid #E4E6EB; border-bottom:1.5px solid #DCDEE3;">'
+      var hb = mh.today ? '2.5px solid ' + TODAY_ACCENT : '1.5px solid #D2D4DA';
+      html += '<div style="flex:1 1 0; min-width:66px; padding:9px 6px; text-align:center; background:' + mh.bg + '; border-right:1px solid #DDDFE4; border-bottom:' + hb + ';">'
             +   '<div style="font-size:12px; font-weight:700; letter-spacing:0.04em; text-transform:uppercase; color:' + mh.color + ';">' + esc(mh.name) + '</div>'
-            +   '<div style="font-size:10.5px; font-weight:600; color:#B0B5BE; margin-top:1px;">' + esc(mh.countLabel) + '</div>'
+            +   '<div style="font-size:10.5px; font-weight:600; color:' + (mh.today ? '#5878CB' : '#9498A1') + '; margin-top:1px;">' + esc(mh.countLabel) + '</div>'
             + '</div>';
     });
     html += '</div>';
 
     // day rows
     v.rows.forEach(function (row) {
+      var todayRow = row.day === TODAY_D;
       html += '<div class="day-row" style="display:flex; flex:1 1 0; min-height:0;">';
-      html += '<div class="day-num" style="flex:0 0 42px; position:sticky; left:0; z-index:2; display:flex; align-items:center; justify-content:center; background:#FAFAFB; border-right:1px solid #C7CBD3; border-bottom:1px solid #D3D7DE; font-size:11px; font-weight:600; color:#7E8490;">' + row.day + '</div>';
+      html += '<div class="day-num" style="flex:0 0 42px; position:sticky; left:0; z-index:2; display:flex; align-items:center; justify-content:center; background:' + (todayRow ? '#E4ECFC' : '#F4F5F8') + '; border-right:1px solid ' + (todayRow ? TODAY_ACCENT : '#C2C6CE') + '; border-bottom:1px solid #C8CCD4; font-size:11px; font-weight:' + (todayRow ? '800' : '600') + '; color:' + (todayRow ? '#23459E' : '#71767F') + ';">' + row.day + '</div>';
       row.cells.forEach(function (cell) {
         var dropAttrs = cell.valid ? (' class="cell" data-drop="cell" data-m="' + cell.m + '" data-d="' + cell.d + '"') : ' class="cell"';
-        html += '<div' + dropAttrs + ' style="flex:1 1 0; min-width:66px; border-right:1px solid #D3D7DE; border-bottom:1px solid #D3D7DE; background:' + cell.bg + '; box-shadow:' + cell.ring + '; padding:2px; display:flex; flex-direction:column; gap:2px;">';
+        html += '<div' + dropAttrs + (cell.today ? ' data-today="1"' : '') + ' style="flex:1 1 0; min-width:66px; border-right:1px solid #C8CCD4; border-bottom:1px solid #C8CCD4; background:' + cell.bg + '; box-shadow:' + cell.ring + '; padding:2px; display:flex; flex-direction:column; gap:2px;">';
         cell.shadeLabels.forEach(function (rl) {
           html += '<div class="range-label" draggable="true" data-id="' + esc(rl.id) + '" data-action="edit" title="' + esc(rl.title) + '" style="background:' + rl.color + '; color:#fff; font-size:10px; font-weight:700; line-height:1.25; padding:2px 5px; border-radius:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; cursor:grab;">' + esc(rl.title) + '</div>';
         });
@@ -791,25 +818,25 @@
             +   '<div data-modal-card style="width:430px; max-width:92vw; background:#fff; border-radius:18px; box-shadow:0 24px 64px rgba(16,24,40,.28); overflow:hidden;">'
             +     '<div style="padding:20px 22px 16px; display:flex; align-items:center; gap:11px; border-bottom:1px solid #F0F1F4;">'
             +       '<span style="width:12px; height:12px; border-radius:50%; background:' + ed.color + ';"></span>'
-            +       '<div style="flex:1; font-size:12px; font-weight:600; color:#9AA0AB;">' + esc(ed.catName) + '</div>'
-            +       (ed.scheduled ? '<div style="font-size:12px; font-weight:600; color:#9AA0AB; background:#F3F4F6; border-radius:20px; padding:3px 10px;">' + esc(ed.placement) + '</div>' : '')
+            +       '<div style="flex:1; font-size:12px; font-weight:600; color:#6E737E;">' + esc(ed.catName) + '</div>'
+            +       (ed.scheduled ? '<div style="font-size:12px; font-weight:600; color:#6E737E; background:#F3F4F6; border-radius:20px; padding:3px 10px;">' + esc(ed.placement) + '</div>' : '')
             +     '</div>'
             +     '<div style="padding:18px 22px 22px;">'
-            +       '<label style="display:block; font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#9AA0AB; margin-bottom:7px;">Title</label>'
+            +       '<label style="display:block; font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#6E737E; margin-bottom:7px;">Title</label>'
             +       '<input type="text" data-field="editTitle" value="' + esc(ed.title) + '" style="width:100%; border:1px solid #E4E6EB; background:#FBFBFC; border-radius:11px; padding:11px 13px; font-size:15px; font-weight:600; color:#1B1E26; margin-bottom:16px;" />'
-            +       '<label style="display:block; font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#9AA0AB; margin-bottom:7px;">Category</label>'
+            +       '<label style="display:block; font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#6E737E; margin-bottom:7px;">Category</label>'
             +       '<select data-field="editCategory" style="width:100%; border:1px solid #E4E6EB; background:#FBFBFC; border-radius:11px; padding:11px 13px; font-size:14px; color:#1B1E26; margin-bottom:16px;">' + optionsHtml(v.categoryOptions, ed.categoryId) + '</select>'
-            +       '<label style="display:block; font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#9AA0AB; margin-bottom:7px;">When</label>';
+            +       '<label style="display:block; font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#6E737E; margin-bottom:7px;">When</label>';
       if (ed.scheduled) {
         html += dateRangeFields('edit', ed.startMonth, ed.startDay, ed.endMonth, ed.endDay)
-              + '<div style="font-size:12.5px; color:#9AA0AB; font-weight:500; margin-bottom:16px;">' + esc(ed.spanText) + '  ·  ' + ed.days + (ed.days === 1 ? ' day' : ' days') + ' — set a later end for a multi-day event</div>';
+              + '<div style="font-size:12.5px; color:#6E737E; font-weight:500; margin-bottom:16px;">' + esc(ed.spanText) + '  ·  ' + ed.days + (ed.days === 1 ? ' day' : ' days') + ' — set a later end for a multi-day event</div>';
       } else {
         html += '<div style="display:flex; align-items:center; gap:10px; margin-bottom:16px; padding:10px 12px; background:#FAFAFB; border:1px solid #EEEFF2; border-radius:11px;">'
-              +   '<span style="flex:1; font-size:12.5px; color:#9AA0AB; font-weight:500;">In backlog — not on the calendar yet</span>'
+              +   '<span style="flex:1; font-size:12.5px; color:#6E737E; font-weight:500;">In backlog — not on the calendar yet</span>'
               +   '<button class="tobacklog-btn" data-action="schedule-item" style="border:1px solid #E4E6EB; background:#fff; color:#5A606C; font-size:12.5px; font-weight:600; cursor:pointer; padding:6px 11px; border-radius:9px;">Add to calendar</button>'
               + '</div>';
       }
-      html += '<label style="display:block; font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#9AA0AB; margin-bottom:7px;">Note</label>'
+      html += '<label style="display:block; font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#6E737E; margin-bottom:7px;">Note</label>'
             +       '<textarea data-field="editNote" placeholder="Add a short note…" style="width:100%; min-height:74px; resize:vertical; border:1px solid #E4E6EB; background:#FBFBFC; border-radius:11px; padding:11px 13px; font-size:13.5px; color:#4B5160; line-height:1.5; box-sizing:border-box; display:block;">' + esc(ed.note) + '</textarea>'
             +     '</div>'
             +     '<div style="display:flex; align-items:center; gap:9px; padding:14px 22px; border-top:1px solid #F0F1F4; background:#FAFAFB;">'
@@ -829,12 +856,12 @@
             +   '<div data-modal-card style="width:400px; max-width:92vw; background:#fff; border-radius:18px; box-shadow:0 24px 64px rgba(16,24,40,.28); overflow:hidden;">'
             +     '<div style="padding:20px 22px 16px; display:flex; align-items:center; gap:11px; border-bottom:1px solid #F0F1F4;">'
             +       '<span style="width:12px; height:12px; border-radius:4px; background:' + ce.colorStr + ';"></span>'
-            +       '<div style="flex:1; font-size:12px; font-weight:600; color:#9AA0AB;">' + esc(ce.title) + '</div>'
+            +       '<div style="flex:1; font-size:12px; font-weight:600; color:#6E737E;">' + esc(ce.title) + '</div>'
             +     '</div>'
             +     '<div style="padding:18px 22px 22px;">'
-            +       '<label style="display:block; font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#9AA0AB; margin-bottom:7px;">Name</label>'
+            +       '<label style="display:block; font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#6E737E; margin-bottom:7px;">Name</label>'
             +       '<input type="text" data-field="catName" value="' + esc(ce.name) + '" placeholder="e.g. Fitness, Public holiday" style="width:100%; border:1px solid #E4E6EB; background:#FBFBFC; border-radius:11px; padding:11px 13px; font-size:15px; font-weight:600; color:#1B1E26; margin-bottom:16px;" />'
-            +       '<label style="display:block; font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#9AA0AB; margin-bottom:9px;">Color</label>'
+            +       '<label style="display:block; font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#6E737E; margin-bottom:9px;">Color</label>'
             +       '<div style="display:flex; flex-wrap:wrap; gap:9px;">';
       ce.swatches.forEach(function (sw) {
         html += '<span class="swatch" data-action="pick-swatch" data-idx="' + sw.idx + '" style="width:26px; height:26px; border-radius:7px; cursor:pointer; background:' + sw.str + '; transition:transform .1s; box-shadow:' + (sw.sel ? '0 0 0 2px #fff, 0 0 0 4px ' + sw.str : 'inset 0 0 0 1px rgba(0,0,0,.06)') + ';"></span>';
@@ -845,7 +872,7 @@
       if (ce.shade) {
         html += '<div style="margin-top:13px; display:flex; flex-direction:column; gap:10px; padding:12px 13px; background:#FAFAFB; border:1px solid #EEEFF2; border-radius:11px;">'
               +   '<label class="topbar-ctl" style="display:flex; align-items:center; gap:9px; font-size:13px; font-weight:600; color:#2A2E38; user-select:none;"><input type="radio" name="shadeAmt" data-field="catShadeAmt" value="full"' + (ce.partial ? '' : ' checked') + ' /> Whole day</label>'
-              +   '<label class="topbar-ctl" style="display:flex; align-items:flex-start; gap:9px; font-size:13px; font-weight:600; color:#2A2E38; user-select:none;"><input type="radio" name="shadeAmt" data-field="catShadeAmt" value="quarter"' + (ce.partial ? ' checked' : '') + ' style="margin-top:2px; flex:0 0 auto;" /><span>Quarter band <span style="font-weight:400; color:#9AA0AB;">— a thin strip down the left that layers on top of full-day shades, so an overlapping vacation stays visible</span></span></label>'
+              +   '<label class="topbar-ctl" style="display:flex; align-items:flex-start; gap:9px; font-size:13px; font-weight:600; color:#2A2E38; user-select:none;"><input type="radio" name="shadeAmt" data-field="catShadeAmt" value="quarter"' + (ce.partial ? ' checked' : '') + ' style="margin-top:2px; flex:0 0 auto;" /><span>Quarter band <span style="font-weight:400; color:#6E737E;">— a thin strip down the left that layers on top of full-day shades, so an overlapping vacation stays visible</span></span></label>'
               + '</div>';
       }
       if (ce.id && ce.refCount > 0) {
@@ -916,6 +943,12 @@
     switch (action) {
       case 'add': addItem(); break;
       case 'reset': resetFilters(); break;
+      case 'toggle-sidebar': toggleSidebar(); break;
+      case 'scroll-today': {
+        var tc = document.querySelector('[data-today]');
+        if (tc && tc.scrollIntoView) tc.scrollIntoView({ block: 'center', inline: 'center', behavior: 'smooth' });
+        break;
+      }
       case 'toggle': toggleCategory(el.getAttribute('data-id')); break;
       case 'edit': state.editorId = el.getAttribute('data-id'); state.catEditor = null; render(); break;
       case 'delete': deleteItem(state.editorId); break;
