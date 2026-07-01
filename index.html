@@ -167,6 +167,18 @@
     };
   }
 
+  // Exactly one category — school holidays — shades the day background and is locked.
+  // Enforce it on every load path so cloud/local data can't drift into extra shaded
+  // categories (e.g. an older client that had shade:true on Verlof).
+  function enforceShadeCategory(categories) {
+    var target = categories.find(function (c) { return /schoolvakantie/i.test(c.name || ''); })
+              || categories.find(function (c) { return c.id === 'c_vacation'; });
+    return categories.map(function (c) {
+      var isTarget = !!target && c.id === target.id;
+      return Object.assign({}, c, { shade: isTarget, partial: false, locked: isTarget });
+    });
+  }
+
   function normalizeItem(it) {
     var d = it.day;
     if (it.month != null && d == null) d = 1;
@@ -243,6 +255,7 @@
         if (typeof s.sidebarCollapsed === 'boolean') runtime.sidebarCollapsed = s.sidebarCollapsed;
       }
     } catch (e) {}
+    base.categories = enforceShadeCategory(base.categories);
     if (!base.categories.some(function (c) { return c.id === runtime.addCategoryId; })) {
       runtime.addCategoryId = base.categories[0] ? base.categories[0].id : 'c_work';
     }
@@ -286,6 +299,7 @@
     // migrate legacy holidays (ranges) coming from an older client
     var folded = foldRanges(state.categories, state.items, state.pv, s.rangeCats, s.ranges);
     state.categories = folded.categories; state.items = folded.items; state.pv = folded.pv;
+    state.categories = enforceShadeCategory(state.categories);
     if (s.addCategoryId) state.addCategoryId = s.addCategoryId;
     if (s.palette && PALETTES[s.palette]) state.palette = s.palette;
     if (typeof s.compact === 'boolean') state.compact = s.compact;
