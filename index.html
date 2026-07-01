@@ -40,6 +40,8 @@
   .swatch:hover { transform:scale(1.1); }
   .collapse-btn:hover { background:#EEF0F3 !important; color:#2A2E38 !important; border-color:#C7CAD2 !important; }
   .today-btn:hover { background:#EEF2FB !important; border-color:#B9C7EC !important; }
+  .year-step:hover:not([disabled]) { background:#EEF0F3 !important; color:#2A2E38 !important; border-color:#C7CAD2 !important; }
+  .year-step[disabled] { opacity:.4; cursor:default; }
 
   /* drag-over highlight (applied directly to drop targets during a drag) */
   .cell.hot { background: rgba(74,110,210,.14) !important; }
@@ -60,14 +62,29 @@
 
   // ----------------------------------------------------------------- constants
   var MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  var DIM  = [31,28,31,30,31,30,31,31,30,31,30,31]; // 2026 (not a leap year)
-  var YEAR = 2026;
-  // "Today" lights up the live date when the calendar's year is the current one.
-  var TODAY_M = 5, TODAY_D = 27; // fallback (June 27)
-  try {
-    var _now = new Date();
-    if (_now.getFullYear() === YEAR) { TODAY_M = _now.getMonth(); TODAY_D = _now.getDate(); }
-  } catch (e) {}
+  var BASE_YEAR = 2026;               // origin year; items saved without a year belong here
+  var MIN_YEAR = 2020, MAX_YEAR = 2100;
+  function dimFor(y) {
+    var leap = (y % 4 === 0 && y % 100 !== 0) || (y % 400 === 0);
+    return [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  }
+  // YEAR / DIM reflect the year currently on the canvas; the stepper changes them.
+  var YEAR = BASE_YEAR;
+  var DIM = dimFor(YEAR);
+  // "Today" markers light up only when the viewed year is the real current year.
+  var TODAY_M = -1, TODAY_D = -1;
+  function realYear() { try { return new Date().getFullYear(); } catch (e) { return BASE_YEAR; } }
+  function refreshYear(y) {
+    YEAR = Math.max(MIN_YEAR, Math.min(MAX_YEAR, y | 0));
+    DIM = dimFor(YEAR);
+    TODAY_M = -1; TODAY_D = -1;
+    try {
+      var n = new Date();
+      if (n.getFullYear() === YEAR) { TODAY_M = n.getMonth(); TODAY_D = n.getDate(); }
+    } catch (e) {}
+    try { document.title = 'Year Canvas — ' + YEAR; } catch (e) {}
+  }
+  refreshYear(realYear());
   var STORE = 'yearcanvas.local.v2';
   var ACCENT_BORDER = 'oklch(0.62 0.12 256)';
   var TODAY_ACCENT = 'oklch(0.54 0.18 262)'; // bolder blue for the current-day markers
@@ -185,6 +202,9 @@
     if (d != null && d > 31) d = 31;
     var month = (it.month == null ? null : it.month);
     var day = (it.month == null ? null : d);
+    // scheduled items belong to a year (legacy items default to the origin year);
+    // backlog items (no month) carry no year and stay shared across all years.
+    var year = (month == null) ? null : (it.year == null ? BASE_YEAR : (it.year | 0));
     var endMonth = null, endDay = null;
     if (month != null && it.endMonth != null) {
       endMonth = it.endMonth; endDay = (it.endDay == null ? day : it.endDay);
@@ -192,7 +212,7 @@
     }
     return {
       id: it.id, title: it.title, categoryId: it.categoryId, note: it.note || '',
-      month: month, day: day, endMonth: endMonth, endDay: endDay
+      month: month, day: day, year: year, endMonth: endMonth, endDay: endDay
     };
   }
 
@@ -338,12 +358,14 @@
     return palette()[id] || SWATCHES[0];
   }
   function visibleItems() { return state.items.filter(function (it) { return state.pv[it.categoryId] !== false; }); }
+  function itemYear(it) { return it.year == null ? BASE_YEAR : it.year; }
   function isWeekend(m, d) { var wd = new Date(YEAR, m, d).getDay(); return wd === 0 || wd === 6; }
 
   // ----------------------------------------------------------------- dates
   function ord(m, d) { var t = 0; for (var i = 0; i < m; i++) t += DIM[i]; return t + d; } // day-of-year
   function fromOrd(o) {
-    if (o < 1) o = 1; if (o > 365) o = 365;
+    var max = 0; for (var i = 0; i < 12; i++) max += DIM[i]; // 365 or 366 (leap)
+    if (o < 1) o = 1; if (o > max) o = max;
     var m = 0;
     while (m < 11 && o > DIM[m]) { o -= DIM[m]; m++; }
     return { m: m, d: o };
@@ -381,7 +403,7 @@
   function addItem() {
     var title = (state.addTitle || '').trim();
     if (!title) return;
-    var it = { id: 'it_' + Date.now(), title: title, categoryId: state.addCategoryId, note: '', month: null, day: null, endMonth: null, endDay: null };
+    var it = { id: 'it_' + Date.now(), title: title, categoryId: state.addCategoryId, note: '', month: null, day: null, year: null, endMonth: null, endDay: null };
     state.items = state.items.concat([it]);
     state.addTitle = '';
     persist(); render();
@@ -392,12 +414,13 @@
     var it = state.items.find(function (x) { return x.id === id; });
     var dur = (it && it.month != null) ? spanDays(it.month, it.day, (it.endMonth == null ? it.month : it.endMonth), (it.endDay == null ? it.day : it.endDay)) : 1;
     var e = fromOrd(ord(m, d) + dur - 1);
-    updateItem(id, { month: m, day: d, endMonth: e.m, endDay: e.d });
+    // dropping onto the grid schedules the item into the year currently in view
+    updateItem(id, { month: m, day: d, year: YEAR, endMonth: e.m, endDay: e.d });
     state.draggingId = null; render();
   }
   function dropToBacklog() {
     var id = state.draggingId; if (id == null) return;
-    updateItem(id, { month: null, day: null, endMonth: null, endDay: null });
+    updateItem(id, { month: null, day: null, year: null, endMonth: null, endDay: null });
     state.draggingId = null; render();
   }
   function deleteItem(id) {
@@ -405,9 +428,21 @@
     state.editorId = null; persist(); render();
   }
   function scheduleItem(id) {
-    updateItem(id, { month: TODAY_M, day: TODAY_D, endMonth: TODAY_M, endDay: TODAY_D });
+    // land on today when the viewed year is the current one, otherwise on Jan 1
+    var m = TODAY_M >= 0 ? TODAY_M : 0;
+    var d = TODAY_D >= 0 ? TODAY_D : 1;
+    updateItem(id, { month: m, day: d, year: YEAR, endMonth: m, endDay: d });
     render();
   }
+  // ----------------------------------------------------------------- year stepper
+  function gotoYear(y) {
+    var ny = Math.max(MIN_YEAR, Math.min(MAX_YEAR, y | 0));
+    if (ny === YEAR) return;
+    refreshYear(ny);
+    state.editorId = null; state.catEditor = null; // dates are year-specific; close editors
+    render();
+  }
+  function stepYear(delta) { gotoYear(YEAR + delta); }
   function updateItemDates(id, field, raw, doRender) {
     var it = state.items.find(function (x) { return x.id === id; });
     if (!it || it.month == null) return;
@@ -480,9 +515,12 @@
     var S = state;
     var vis = visibleItems();
 
+    // counts reflect what's on this view: the backlog (shared) plus items
+    // scheduled in the year currently on the canvas.
     var catCount = {}, monthCount = {};
     S.items.forEach(function (it) {
       if (S.pv[it.categoryId] === false) return;
+      if (it.month != null && itemYear(it) !== YEAR) return; // scheduled in another year
       catCount[it.categoryId] = (catCount[it.categoryId] || 0) + 1;
       if (it.month != null) monthCount[it.month] = (monthCount[it.month] || 0) + 1;
     });
@@ -492,6 +530,7 @@
     var sched = [];
     vis.forEach(function (it) {
       if (it.month == null) return;
+      if (itemYear(it) !== YEAR) return; // only events in the viewed year land on the grid
       var lo = ord(it.month, it.day || 1);
       var em = (it.endMonth == null ? it.month : it.endMonth);
       var ed = (it.endDay == null ? (it.day || 1) : it.endDay);
@@ -559,7 +598,7 @@
       };
     });
 
-    var schedVis = vis.filter(function (it) { return it.month != null; });
+    var schedVis = vis.filter(function (it) { return it.month != null && itemYear(it) === YEAR; });
     var total = schedVis.length;
     var balanceSegments = S.categories.map(function (c) {
       var n = schedVis.filter(function (it) { return it.categoryId === c.id; }).length;
@@ -605,9 +644,14 @@
       };
     }
 
+    var rY = realYear();
     return {
       yearLabel: String(YEAR),
-      todayLabel: MONTHS_SHORT[TODAY_M] + ' ' + TODAY_D,
+      todayLabel: (TODAY_M >= 0 ? MONTHS_SHORT[TODAY_M] + ' ' + TODAY_D : ''),
+      isCurrentYear: (YEAR === rY),
+      currentYear: rY,
+      canPrevYear: YEAR > MIN_YEAR,
+      canNextYear: YEAR < MAX_YEAR,
       scheduledCount: schedVis.length,
       backlogCount: backlogItems.length,
       showBalance: S.showBalance,
@@ -762,13 +806,19 @@
           +     (state.sidebarCollapsed
                   ? '<button class="collapse-btn" data-action="toggle-sidebar" title="Show sidebar" aria-label="Show sidebar" style="flex:0 0 auto; width:30px; height:30px; border:1px solid #DCDEE3; background:#fff; color:#4E5460; border-radius:8px; cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:14px; line-height:1;">☰</button>'
                   : '')
-          +     '<div style="font-size:17px; font-weight:700; letter-spacing:-0.01em;">' + esc(v.yearLabel) + '</div>'
+          +     '<div style="display:flex; align-items:center; gap:3px;">'
+          +       '<button class="year-step" data-action="year-prev"' + (v.canPrevYear ? '' : ' disabled') + ' title="Previous year" aria-label="Previous year" style="width:27px; height:27px; border:1px solid #DCDEE3; background:#fff; color:#4E5460; border-radius:8px; cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:16px; line-height:1;">‹</button>'
+          +       '<div style="font-size:17px; font-weight:700; letter-spacing:-0.01em; min-width:54px; text-align:center;">' + esc(v.yearLabel) + '</div>'
+          +       '<button class="year-step" data-action="year-next"' + (v.canNextYear ? '' : ' disabled') + ' title="Next year" aria-label="Next year" style="width:27px; height:27px; border:1px solid #DCDEE3; background:#fff; color:#4E5460; border-radius:8px; cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:16px; line-height:1;">›</button>'
+          +     '</div>'
           +     '<div style="font-size:13px; color:#6E737E;">Year planner</div>'
           +   '</div>'
           +   '<div style="display:flex; align-items:center; gap:16px;">'
           +     '<div style="font-size:12.5px; color:#7C818C;">Drag from backlog onto any day · drag back to unschedule</div>'
           +     '<div style="font-size:12.5px; color:#5A606C; font-weight:600;">' + v.scheduledCount + ' scheduled</div>'
-          +     '<button class="today-btn" data-action="scroll-today" title="Jump to today" style="display:flex; align-items:center; gap:7px; border:1px solid #C6D2F0; background:#EEF2FB; color:#23459E; font-size:12.5px; font-weight:700; cursor:pointer; padding:5px 12px; border-radius:20px;"><span style="width:7px; height:7px; border-radius:50%; background:' + TODAY_ACCENT + ';"></span>' + esc(v.todayLabel) + '</button>'
+          +     (v.isCurrentYear
+                  ? '<button class="today-btn" data-action="scroll-today" title="Jump to today" style="display:flex; align-items:center; gap:7px; border:1px solid #C6D2F0; background:#EEF2FB; color:#23459E; font-size:12.5px; font-weight:700; cursor:pointer; padding:5px 12px; border-radius:20px;"><span style="width:7px; height:7px; border-radius:50%; background:' + TODAY_ACCENT + ';"></span>' + esc(v.todayLabel) + '</button>'
+                  : '<button class="today-btn" data-action="go-current-year" title="Back to ' + v.currentYear + '" style="display:flex; align-items:center; gap:7px; border:1px solid #C6D2F0; background:#EEF2FB; color:#23459E; font-size:12.5px; font-weight:700; cursor:pointer; padding:5px 12px; border-radius:20px;">↩ ' + v.currentYear + '</button>')
           +   '</div>'
           + '</div>';
 
@@ -929,6 +979,9 @@
     }
     switch (action) {
       case 'add': addItem(); break;
+      case 'year-prev': stepYear(-1); break;
+      case 'year-next': stepYear(1); break;
+      case 'go-current-year': gotoYear(realYear()); break;
       case 'toggle-sidebar': toggleSidebar(); break;
       case 'scroll-today': {
         var tc = document.querySelector('[data-today]');
