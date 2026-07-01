@@ -335,6 +335,9 @@
     return { m: m, d: o };
   }
   function shadeTint(color) { return 'color-mix(in oklab, ' + color + ' 15%, #ffffff)'; }
+  // weekend cell within a shaded span: tint the event color into grey (not white) so
+  // the darker grey still reads as a weekend while keeping the event's hue.
+  function shadeTintWeekend(color) { return 'color-mix(in oklab, ' + color + ' 18%, #DFE2E7)'; }
   function shadeBand(color) { return 'color-mix(in oklab, ' + color + ' 45%, #ffffff)'; } // left-25% band overlay color
   function clampDay(m, d) { d = parseInt(d, 10); if (isNaN(d) || d < 1) d = 1; if (d > DIM[m]) d = DIM[m]; return d; }
   function spanDays(sm, sd, em, ed) { return ord(em, ed) - ord(sm, sd) + 1; }
@@ -530,7 +533,7 @@
           }
         }
 
-        var base = !valid ? '#DBDDE1' : (coverColor ? shadeTint(coverColor) : (weekend ? '#EDEFF2' : '#FFFFFF'));
+        var base = !valid ? '#DBDDE1' : (coverColor ? (weekend ? shadeTintWeekend(coverColor) : shadeTint(coverColor)) : (weekend ? '#EDEFF2' : '#FFFFFF'));
         if (isToday && !coverColor) base = '#E8F0FE'; // tint today when it isn't already shaded
         var bg = bandColor
           ? 'linear-gradient(to right, ' + shadeBand(bandColor) + ' 0%, ' + shadeBand(bandColor) + ' 25%, transparent 25%, transparent 100%), ' + base
