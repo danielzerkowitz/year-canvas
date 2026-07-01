@@ -114,8 +114,8 @@
       { id:'c_home', name:'Home' },
       { id:'c_travel', name:'Travel' },
       { id:'c_personal', name:'Personal' },
-      { id:'c_vacation', name:'Vacation', color:COLOR_VACATION, shade:true },
-      { id:'c_holiday', name:'Public holiday', color:COLOR_HOLIDAY, shade:true, partial:true },
+      { id:'c_vacation', name:'Schoolvakantie', color:COLOR_VACATION, shade:true, locked:true },
+      { id:'c_holiday', name:'Public holiday', color:COLOR_HOLIDAY },
     ];
     var items = [
       // ---- backlog (month: null) ----
@@ -162,7 +162,8 @@
       name: c.name || 'Category',
       color: (c.color && typeof c.color === 'object') ? c.color : null,
       shade: !!c.shade,
-      partial: !!c.partial // shade only a 25% band (layers over full-day shades)
+      partial: !!c.partial, // shade only a 25% band (layers over full-day shades)
+      locked: !!c.locked // built-in category the user can't rename/recolor/delete
     };
   }
 
@@ -420,7 +421,7 @@
   }
   function openCatEdit(id) {
     var c = catById(id);
-    if (!c) return;
+    if (!c || c.locked) return; // locked built-in categories can't be edited
     state.catEditor = { id: id, name: c.name, color: catColorObj(id), shade: !!c.shade, partial: !!c.partial };
     state.editorId = null; render();
   }
@@ -472,8 +473,8 @@
       if (it.month != null) monthCount[it.month] = (monthCount[it.month] || 0) + 1;
     });
 
-    // scheduled items, each with its inclusive day-of-year coverage. Every event
-    // tints its whole day span and labels the start day.
+    // scheduled items, each with its inclusive day-of-year coverage. Items in a
+    // shaded category tint their whole span; every item labels its start day.
     var sched = [];
     vis.forEach(function (it) {
       if (it.month == null) return;
@@ -482,7 +483,8 @@
       var ed = (it.endDay == null ? (it.day || 1) : it.endDay);
       var hi = ord(em, ed);
       if (hi < lo) { var t = lo; lo = hi; hi = t; }
-      sched.push({ lo: lo, hi: hi, id: it.id, title: it.title, color: catColor(it.categoryId) });
+      var cat = catById(it.categoryId);
+      sched.push({ lo: lo, hi: hi, id: it.id, title: it.title, color: catColor(it.categoryId), shade: !!(cat && cat.shade) });
     });
 
     var backlogItems = vis.filter(function (it) { return it.month == null; }).map(itemView);
@@ -507,16 +509,15 @@
         var isToday = valid && m === TODAY_M && d === TODAY_D;
         var od = valid ? ord(m, d) : 0;
 
-        // multi-day events tint their whole day span; the first covering event wins the
-        // day's tint. Single-day events only label their start day with a title pill.
+        // only shaded categories (school holidays) tint the day's background; the
+        // first covering shaded event wins the day's tint. Every other event just
+        // labels its start day with a title pill.
         var coverColor = null, shadeLabels = [];
         if (valid) {
           for (var si = 0; si < sched.length; si++) {
             var s = sched[si];
             if (s.lo <= od && od <= s.hi) {
-              // only multi-day events shade the day's background; single-day
-              // events show just their title pill.
-              if (!coverColor && s.hi > s.lo) coverColor = s.color;
+              if (!coverColor && s.shade) coverColor = s.color;
               if (od === s.lo) shadeLabels.push({ id: s.id, title: s.title, color: s.color });
             }
           }
@@ -536,7 +537,7 @@
       var on = S.pv[c.id] !== false;
       var color = catColor(c.id);
       return {
-        id: c.id, name: c.name, count: catCount[c.id] || 0, shade: !!c.shade, partial: !!c.partial,
+        id: c.id, name: c.name, count: catCount[c.id] || 0, shade: !!c.shade, partial: !!c.partial, locked: !!c.locked,
         swatchBg: on ? color : '#fff',
         swatchBorder: on ? color : '#C9CDD5',
         mark: on ? '✓' : '',
@@ -703,7 +704,7 @@
             +     '<span style="color:#fff; font-size:10px; font-weight:800; line-height:1;">' + cat.mark + '</span>'
             +   '</span>'
             +   '<span data-action="toggle" data-id="' + esc(cat.id) + '" style="flex:1; cursor:pointer; font-size:13.5px; font-weight:600; color:' + cat.textColor + ';">' + esc(cat.name) + '</span>'
-            +   '<span class="cat-edit" data-action="edit-cat" data-id="' + esc(cat.id) + '" title="Edit category" style="flex:0 0 auto; font-size:12px; color:#B0B5BE;">✎</span>'
+            +   (cat.locked ? '<span title="Built-in category" style="flex:0 0 auto; font-size:11px; color:#C9CDD5;">🔒</span>' : '<span class="cat-edit" data-action="edit-cat" data-id="' + esc(cat.id) + '" title="Edit category" style="flex:0 0 auto; font-size:12px; color:#B0B5BE;">✎</span>')
             +   '<span style="flex:0 0 auto; font-size:11px; color:#B7BCC5; font-weight:600;">' + cat.count + '</span>'
             + '</div>';
     });
