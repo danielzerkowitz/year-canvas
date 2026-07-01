@@ -507,14 +507,16 @@
         var isToday = valid && m === TODAY_M && d === TODAY_D;
         var od = valid ? ord(m, d) : 0;
 
-        // every event tints its whole day span; the first covering event wins the day's
-        // tint, and each event labels its start day with a title pill.
+        // multi-day events tint their whole day span; the first covering event wins the
+        // day's tint. Single-day events only label their start day with a title pill.
         var coverColor = null, shadeLabels = [];
         if (valid) {
           for (var si = 0; si < sched.length; si++) {
             var s = sched[si];
             if (s.lo <= od && od <= s.hi) {
-              if (!coverColor) coverColor = s.color;
+              // only multi-day events shade the day's background; single-day
+              // events show just their title pill.
+              if (!coverColor && s.hi > s.lo) coverColor = s.color;
               if (od === s.lo) shadeLabels.push({ id: s.id, title: s.title, color: s.color });
             }
           }
