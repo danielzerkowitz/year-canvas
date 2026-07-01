@@ -337,7 +337,6 @@
   // weekend cell within a shaded span: tint the event color into grey (not white) so
   // the darker grey still reads as a weekend while keeping the event's hue.
   function shadeTintWeekend(color) { return 'color-mix(in oklab, ' + color + ' 18%, #DFE2E7)'; }
-  function shadeBand(color) { return 'color-mix(in oklab, ' + color + ' 45%, #ffffff)'; } // left-25% band overlay color
   function clampDay(m, d) { d = parseInt(d, 10); if (isNaN(d) || d < 1) d = 1; if (d > DIM[m]) d = DIM[m]; return d; }
   function spanDays(sm, sd, em, ed) { return ord(em, ed) - ord(sm, sd) + 1; }
   function formatSpan(sm, sd, em, ed) {
@@ -473,8 +472,8 @@
       if (it.month != null) monthCount[it.month] = (monthCount[it.month] || 0) + 1;
     });
 
-    // scheduled items, each with its inclusive day-of-year coverage. Shaded-category
-    // items tint the day; the rest render as chips.
+    // scheduled items, each with its inclusive day-of-year coverage. Every event
+    // tints its whole day span and labels the start day.
     var sched = [];
     vis.forEach(function (it) {
       if (it.month == null) return;
@@ -483,8 +482,7 @@
       var ed = (it.endDay == null ? (it.day || 1) : it.endDay);
       var hi = ord(em, ed);
       if (hi < lo) { var t = lo; lo = hi; hi = t; }
-      var cat = catById(it.categoryId);
-      sched.push({ lo: lo, hi: hi, view: itemView(it), id: it.id, title: it.title, shade: !!(cat && cat.shade), partial: !!(cat && cat.partial), color: catColor(it.categoryId) });
+      sched.push({ lo: lo, hi: hi, id: it.id, title: it.title, color: catColor(it.categoryId) });
     });
 
     var backlogItems = vis.filter(function (it) { return it.month == null; }).map(itemView);
@@ -509,32 +507,23 @@
         var isToday = valid && m === TODAY_M && d === TODAY_D;
         var od = valid ? ord(m, d) : 0;
 
-        // shaded-category items: full shades tint the whole cell; quarter shades draw a
-        // thin band down the left 25% that layers over a full shade. Both label the start day.
-        // normal items: full chip on the start day, continuation bar otherwise.
-        var coverColor = null, bandColor = null, shadeLabels = [], cellItems = [];
+        // every event tints its whole day span; the first covering event wins the day's
+        // tint, and each event labels its start day with a title pill.
+        var coverColor = null, shadeLabels = [];
         if (valid) {
           for (var si = 0; si < sched.length; si++) {
             var s = sched[si];
             if (s.lo <= od && od <= s.hi) {
-              if (s.shade) {
-                if (s.partial) { if (!bandColor) bandColor = s.color; }
-                else if (!coverColor) coverColor = s.color;
-                if (od === s.lo) shadeLabels.push({ id: s.id, title: s.title, color: s.color, partial: s.partial });
-              } else {
-                cellItems.push({ v: s.view, start: od === s.lo });
-              }
+              if (!coverColor) coverColor = s.color;
+              if (od === s.lo) shadeLabels.push({ id: s.id, title: s.title, color: s.color });
             }
           }
         }
 
         var base = !valid ? '#DBDDE1' : (coverColor ? (weekend ? shadeTintWeekend(coverColor) : shadeTint(coverColor)) : (weekend ? '#EDEFF2' : '#FFFFFF'));
         if (isToday && !coverColor) base = '#E8F0FE'; // tint today when it isn't already shaded
-        var bg = bandColor
-          ? 'linear-gradient(to right, ' + shadeBand(bandColor) + ' 0%, ' + shadeBand(bandColor) + ' 25%, transparent 25%, transparent 100%), ' + base
-          : base;
         cells.push({
-          valid: valid, items: cellItems, shadeLabels: shadeLabels, bg: bg, m: m, d: d, today: isToday,
+          valid: valid, shadeLabels: shadeLabels, bg: base, m: m, d: d, today: isToday,
           ring: isToday ? 'inset 0 0 0 2px ' + TODAY_ACCENT : 'none'
         });
       }
@@ -711,7 +700,7 @@
             +   '<span data-action="toggle" data-id="' + esc(cat.id) + '" style="flex:0 0 auto; width:15px; height:15px; border-radius:4px; display:flex; align-items:center; justify-content:center; cursor:pointer; background:' + cat.swatchBg + '; border:1.5px solid ' + cat.swatchBorder + ';">'
             +     '<span style="color:#fff; font-size:10px; font-weight:800; line-height:1;">' + cat.mark + '</span>'
             +   '</span>'
-            +   '<span data-action="toggle" data-id="' + esc(cat.id) + '" style="flex:1; cursor:pointer; font-size:13.5px; font-weight:600; color:' + cat.textColor + ';">' + esc(cat.name) + (cat.shade ? ' <span title="' + (cat.partial ? 'Shades a quarter band (layers over full-day shades)' : 'Shades the whole day') + '" style="font-weight:400; color:#B7BCC5; font-size:11px;">' + (cat.partial ? '▎' : '▦') + '</span>' : '') + '</span>'
+            +   '<span data-action="toggle" data-id="' + esc(cat.id) + '" style="flex:1; cursor:pointer; font-size:13.5px; font-weight:600; color:' + cat.textColor + ';">' + esc(cat.name) + '</span>'
             +   '<span class="cat-edit" data-action="edit-cat" data-id="' + esc(cat.id) + '" title="Edit category" style="flex:0 0 auto; font-size:12px; color:#B0B5BE;">✎</span>'
             +   '<span style="flex:0 0 auto; font-size:11px; color:#B7BCC5; font-weight:600;">' + cat.count + '</span>'
             + '</div>';
@@ -793,14 +782,6 @@
         cell.shadeLabels.forEach(function (rl) {
           html += '<div class="range-label" draggable="true" data-id="' + esc(rl.id) + '" data-action="edit" title="' + esc(rl.title) + '" style="background:' + rl.color + '; color:#fff; font-size:10px; font-weight:700; line-height:1.25; padding:2px 5px; border-radius:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; cursor:grab;">' + esc(rl.title) + '</div>';
         });
-        cell.items.forEach(function (ci) {
-          var it = ci.v;
-          if (ci.start) {
-            html += '<div class="chip" draggable="true" data-id="' + esc(it.id) + '" data-action="edit" title="' + esc(it.title) + '" style="background:' + it.chipBg + '; color:' + it.chipText + '; border-left:2.5px solid ' + it.color + '; font-size:10.5px; font-weight:600; line-height:1.3; padding:2px 4px 2px 5px; border-radius:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; cursor:grab;">' + esc(it.title) + '</div>';
-          } else {
-            html += '<div class="chip-cont" data-id="' + esc(it.id) + '" data-action="edit" title="' + esc(it.title) + '" style="height:9px; background:' + it.chipBg + '; border-left:2.5px solid ' + it.color + '; border-radius:3px; cursor:pointer;"></div>';
-          }
-        });
         html += '</div>';
       });
       html += '</div>';
@@ -863,15 +844,7 @@
       ce.swatches.forEach(function (sw) {
         html += '<span class="swatch" data-action="pick-swatch" data-idx="' + sw.idx + '" style="width:26px; height:26px; border-radius:7px; cursor:pointer; background:' + sw.str + '; transition:transform .1s; box-shadow:' + (sw.sel ? '0 0 0 2px #fff, 0 0 0 4px ' + sw.str : 'inset 0 0 0 1px rgba(0,0,0,.06)') + ';"></span>';
       });
-      html += '</div>'
-            +       '<label class="topbar-ctl" style="display:flex; align-items:center; gap:9px; margin-top:18px; font-size:13.5px; font-weight:600; color:#2A2E38; user-select:none;"><input type="checkbox" data-field="catShade"' + (ce.shade ? ' checked' : '') + ' /> Shade the day instead of a chip</label>'
-            +       '<div style="font-size:12px; color:#B0B5BE; font-weight:500; margin-top:5px;">For holidays, vacations &amp; time off — events tint the day instead of showing a chip.</div>';
-      if (ce.shade) {
-        html += '<div style="margin-top:13px; display:flex; flex-direction:column; gap:10px; padding:12px 13px; background:#FAFAFB; border:1px solid #EEEFF2; border-radius:11px;">'
-              +   '<label class="topbar-ctl" style="display:flex; align-items:center; gap:9px; font-size:13px; font-weight:600; color:#2A2E38; user-select:none;"><input type="radio" name="shadeAmt" data-field="catShadeAmt" value="full"' + (ce.partial ? '' : ' checked') + ' /> Whole day</label>'
-              +   '<label class="topbar-ctl" style="display:flex; align-items:flex-start; gap:9px; font-size:13px; font-weight:600; color:#2A2E38; user-select:none;"><input type="radio" name="shadeAmt" data-field="catShadeAmt" value="quarter"' + (ce.partial ? ' checked' : '') + ' style="margin-top:2px; flex:0 0 auto;" /><span>Quarter band <span style="font-weight:400; color:#6E737E;">— a thin strip down the left that layers on top of full-day shades, so an overlapping vacation stays visible</span></span></label>'
-              + '</div>';
-      }
+      html += '</div>';
       if (ce.id && ce.refCount > 0) {
         html += '<div style="font-size:12px; color:#B0B5BE; font-weight:500; margin-top:14px;">Deleting moves its ' + ce.refCount + ' ' + ce.refLabel + ' to another category.</div>';
       }
@@ -982,8 +955,6 @@
     else if (f === 'editEndMonth') { if (state.editorId) updateItemDates(state.editorId, 'endMonth', e.target.value, true); }
     else if (f === 'editStartDay') { if (state.editorId) updateItemDates(state.editorId, 'startDay', e.target.value, true); }
     else if (f === 'editEndDay') { if (state.editorId) updateItemDates(state.editorId, 'endDay', e.target.value, true); }
-    else if (f === 'catShade') { if (state.catEditor) { state.catEditor.shade = e.target.checked; render(); } }
-    else if (f === 'catShadeAmt') { if (state.catEditor) { state.catEditor.partial = (e.target.value === 'quarter'); render(); } }
     else if (f === 'palette') { state.palette = e.target.value; persist(); render(); }
     else if (f === 'showBalance') { state.showBalance = e.target.checked; persist(); render(); }
     else if (f === 'compact') { state.compact = e.target.checked; persist(); render(); }
